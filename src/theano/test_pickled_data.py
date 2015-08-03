@@ -1,19 +1,17 @@
 '''
 Input file:
- * gzipped
  * stream of ndarrays.  All arrays of equal length.
  * Each array is one feature vector.
 '''
 
 import cPickle as pickle
-import gzip
 import sys
 
 
 filename = sys.argv[1]
 
 ref_veclen = None
-with gzip.open(filename) as fin:
+with open(filename) as fin:
     ii = 0
     while True:
         try:

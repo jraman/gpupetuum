@@ -7,7 +7,6 @@ If converting all samples, inlabelfile is redundant, but makes the code simpler.
 '''
 
 import cPickle
-import gzip
 import logging
 import numpy as np
 import struct
@@ -39,25 +38,29 @@ class Llc2Pickle(object):
         self.num_features = num_features
         self.outfile = outfile
         self.selectlabelfile = selectlabelfile
-        self.outlabelfile = outlabelfile
+        if selectlabelfile:
+            self.outlabelfile = outlabelfile
+        else:
+            self.outlabelfile = '/dev/null'
 
         self.outlabels = set()
-        logging.info('infile: {}, inlabelfile: {}, outfile: {}, outlabelfile: {}'.format(
-            self.infile, self.outfile, self.inlabelfile, self.outlabelfile))
+        logging.info('infile: {}, outfile: {}, inlabelfile: {}, selectlabelfile: {}, outlabelfile: {}'.format(
+            self.infile, self.outfile, self.inlabelfile, self.selectlabelfile, self.outlabelfile))
 
     def process_file(self):
         '''Read binary imnet infile and write to outfile'''
-        sample_output = self.outlabelfile is not None
+        sample_output = self.selectlabelfile is not None
         if sample_output:
             self.outlabelset = self.read_outlabels()
 
         with open(self.infile, 'rb') as fin, open(self.inlabelfile, 'r') as finlab:
-            with gzip.open(self.outfile, 'wb') as fout, open(self.outlabelfile, 'wb') as foutlab:
+            with open(self.outfile, 'wb') as fout, open(self.outlabelfile, 'wb') as foutlab:
                 end_of_label_file = False
                 ii = 0
                 while True:
                     try:
-                        label = int(finlab.next()) if sample_output else None
+                        # read label regardless of sample_output, so we can check EOF of label and data files
+                        label = int(finlab.next())
                     except StopIteration:
                         label = None
                         end_of_label_file = True
@@ -71,11 +74,12 @@ class Llc2Pickle(object):
                         break
                     if not skip:
                         cPickle.dump(sample, fout, protocol=2)
-                        foutlab.write('{}\n'.format(label))
-                        logging.debug('wrote 1 sample for label {}'.format(label or 'next'))
-                    if ii % 1000 == 0:
-                        logging.debug('processed 1000')
+                        if sample_output:
+                            foutlab.write('{}\n'.format(label))
+                            logging.debug('wrote 1 sample for label {}'.format(label or 'next'))
                     ii += 1
+                    if ii % 1000 == 0:
+                        logging.debug('processed {}'.format(ii))
 
     def read_sample(self, fin, skip):
         '''Read file and yield one feature vector.
