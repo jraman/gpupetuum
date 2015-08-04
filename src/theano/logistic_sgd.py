@@ -35,12 +35,12 @@ References:
 __docformat__ = 'restructedtext en'
 
 import cPickle
-import gzip
 import os
 import sys
 import timeit
 
-import numpy
+import logging
+import numpy as np
 
 import theano
 import theano.tensor as T
@@ -55,7 +55,7 @@ class LogisticRegression(object):
     determine a class membership probability.
     """
 
-    def __init__(self, input, n_in, n_out):
+    def __init__(self, input, n_in, n_out, include_bias=True):
         """ Initialize the parameters of the logistic regression
 
         :type input: theano.tensor.TensorType
@@ -70,11 +70,13 @@ class LogisticRegression(object):
         :param n_out: number of output units, the dimension of the space in
                       which the labels lie
 
+        :type include_bias: boolean
+        :param include_bias: add bias term.  By default bias term is excluded.
         """
         # start-snippet-1
         # initialize with 0 the weights W as a matrix of shape (n_in, n_out)
         self.W = theano.shared(
-            value=numpy.zeros(
+            value=np.zeros(
                 (n_in, n_out),
                 dtype=theano.config.floatX
             ),
@@ -82,14 +84,15 @@ class LogisticRegression(object):
             borrow=True
         )
         # initialize the biases b as a vector of n_out 0s
-        self.b = theano.shared(
-            value=numpy.zeros(
-                (n_out,),
-                dtype=theano.config.floatX
-            ),
-            name='b',
-            borrow=True
-        )
+        if include_bias:
+            self.b = theano.shared(
+                value=np.zeros(
+                    (n_out,),
+                    dtype=theano.config.floatX
+                ),
+                name='b',
+                borrow=True
+            )
 
         # symbolic expression for computing the matrix of class-membership
         # probabilities
@@ -99,7 +102,10 @@ class LogisticRegression(object):
         # x is a matrix where row-j  represents input training sample-j
         # b is a vector where element-k represent the free parameter of
         # hyperplane-k
-        self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
+        if include_bias:
+            self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
+        else:
+            self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W))
 
         # symbolic description of how to compute prediction as class whose
         # probability is maximal
@@ -107,7 +113,8 @@ class LogisticRegression(object):
         # end-snippet-1
 
         # parameters of the model
-        self.params = [self.W, self.b]
+        # self.params = [self.W, self.b]
+        self.params = [self.W, ]
 
         # keep track of model input
         self.input = input
@@ -166,91 +173,115 @@ class LogisticRegression(object):
             # represents a mistake in prediction
             return T.mean(T.neq(self.y_pred, y))
         else:
-            raise NotImplementedError()
+            raise NotImplementedError('can handle only int y values at this time')
 
 
-def load_data(dataset):
+def _shared_dataset(data_x, data_y, borrow=True):
+    """ Function that loads the dataset into shared variables
+
+    The reason we store our dataset in shared variables is to allow
+    Theano to copy it into the GPU memory (when code is run on GPU).
+    Since copying data into the GPU is slow, copying a minibatch everytime
+    is needed (the default behaviour if the data is not in a shared
+    variable) would lead to a large decrease in performance.
+    """
+    shared_x = theano.shared(np.asarray(data_x,
+                                        dtype=theano.config.floatX),
+                             borrow=borrow)
+    shared_y = theano.shared(np.asarray(data_y,
+                                        dtype=theano.config.floatX),
+                             borrow=borrow)
+    # When storing data on the GPU it has to be stored as floats
+    # therefore we will store the labels as ``floatX`` as well
+    # (``shared_y`` does exactly that). But during our computations
+    # we need them as ints (we use labels as index, and if they are
+    # floats it doesn't make sense) therefore instead of returning
+    # ``shared_y`` we will have to cast it to int. This little hack
+    # lets us get around this issue
+    return shared_x, T.cast(shared_y, 'int32')
+
+
+def load_pickle_file(fobj):
+    while True:
+        try:
+            yield cPickle.load(fobj)
+        except EOFError:
+            break
+
+
+def load_data(dataset, label_file):
     ''' Loads the dataset
 
     :type dataset: string
-    :param dataset: the path to the dataset (here MNIST)
+    :param dataset: the path to the dataset
+
+    # train_set is a tuple(ndarray1, ndarray2)
+    # ndarray1 and ndarray2 are of length = num_samples
+    # each elem of ndarray1 is an ndarray of length = num_features (dtype=float32)
+    # ndarray2 is of length num_samples, each element is the image label (an int32)
+
+    For imnet, we set test = valid = train
     '''
 
     #############
     # LOAD DATA #
     #############
 
-    # Download the MNIST dataset if it is not present
-    data_dir, data_file = os.path.split(dataset)
-    if data_dir == "" and not os.path.isfile(dataset):
-        # Check if dataset is in the data directory.
-        new_path = os.path.join(
-            os.path.split(__file__)[0],
-            "..",
-            "data",
-            dataset
-        )
-        if os.path.isfile(new_path) or data_file == 'mnist.pkl.gz':
-            dataset = new_path
-
-    if (not os.path.isfile(dataset)) and data_file == 'mnist.pkl.gz':
-        import urllib
-        origin = (
-            'http://www.iro.umontreal.ca/~lisa/deep/data/mnist/mnist.pkl.gz'
-        )
-        print 'Downloading data from %s' % origin
-        urllib.urlretrieve(origin, dataset)
-
     print '... loading data'
 
     # Load the dataset
-    f = gzip.open(dataset, 'rb')
-    train_set, valid_set, test_set = cPickle.load(f)
-    f.close()
-    #train_set, valid_set, test_set format: tuple(input, target)
-    #input is an numpy.ndarray of 2 dimensions (a matrix)
-    #witch row's correspond to an example. target is a
-    #numpy.ndarray of 1 dimensions (vector)) that have the same length as
-    #the number of rows in the input. It should give the target
-    #target to the example with the same index in the input.
+    with open(dataset, 'rb') as fobj:
+        train_set_x = np.array([x for x in load_pickle_file(fobj)])
 
-    def shared_dataset(data_xy, borrow=True):
-        """ Function that loads the dataset into shared variables
+    with open(label_file, 'r') as ff:
+        train_set_label = np.array([int(line.strip()) for line in ff], dtype=np.int32)
 
-        The reason we store our dataset in shared variables is to allow
-        Theano to copy it into the GPU memory (when code is run on GPU).
-        Since copying data into the GPU is slow, copying a minibatch everytime
-        is needed (the default behaviour if the data is not in a shared
-        variable) would lead to a large decrease in performance.
-        """
-        data_x, data_y = data_xy
-        shared_x = theano.shared(numpy.asarray(data_x,
-                                               dtype=theano.config.floatX),
-                                 borrow=borrow)
-        shared_y = theano.shared(numpy.asarray(data_y,
-                                               dtype=theano.config.floatX),
-                                 borrow=borrow)
-        # When storing data on the GPU it has to be stored as floats
-        # therefore we will store the labels as ``floatX`` as well
-        # (``shared_y`` does exactly that). But during our computations
-        # we need them as ints (we use labels as index, and if they are
-        # floats it doesn't make sense) therefore instead of returning
-        # ``shared_y`` we will have to cast it to int. This little hack
-        # lets ous get around this issue
-        return shared_x, T.cast(shared_y, 'int32')
+    # theano requires that the labels be in the range [0, L), where L is the number of unique labels.
+    label2idx = dict((ll, ii) for ii, ll in enumerate(set(train_set_label)))
+    train_set_y = np.array([label2idx[ll] for ll in train_set_label], dtype=np.int32)
 
-    test_set_x, test_set_y = shared_dataset(test_set)
-    valid_set_x, valid_set_y = shared_dataset(valid_set)
-    train_set_x, train_set_y = shared_dataset(train_set)
+    nrow = train_set_x.shape[0]
+    assert nrow == train_set_y.shape[0], "Num rows in X and Y don't match"
 
-    rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y),
-            (test_set_x, test_set_y)]
+    # with replacement
+    np.random.seed(4242)
+    valid_set_idx = np.random.choice(nrow, 0.3 * nrow)
+    valid_set_x, valid_set_y = train_set_x[valid_set_idx], train_set_y[valid_set_idx]
+    logging.info('Selected {} rows as validation set'.format(len(valid_set_idx)))
+
+    np.random.seed(4343)
+    test_set_idx = np.random.choice(nrow, 0.2 * nrow)
+    test_set_x, test_set_y = train_set_x[test_set_idx], train_set_y[test_set_idx]
+    logging.info('Selected {} rows as test set'.format(len(test_set_idx)))
+
+    # train_set, valid_set, test_set format: tuple(input, target)
+    # input, x, is an np.ndarray of 2 dimensions (a matrix)
+    # with each row corresponding to an example. target, y, is a
+    # np.ndarray of 1 dimensions (vector)) that have the same length as
+    # the number of rows in the input. The target should be associated
+    # with the same index in the input.
+
+    shared_train_set_x, shared_train_set_y = _shared_dataset(train_set_x, train_set_y)
+    shared_valid_set_x, shared_valid_set_y = _shared_dataset(valid_set_x, valid_set_y)
+    shared_test_set_x, shared_test_set_y = _shared_dataset(test_set_x, test_set_y)
+
+    rval = [
+        (shared_train_set_x, shared_train_set_y),
+        (shared_valid_set_x, shared_valid_set_y),
+        (shared_test_set_x, shared_test_set_y),
+    ]
     return rval
 
 
-def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
-                           dataset='mnist.pkl.gz',
-                           batch_size=600):
+def sgd_optimization_mnist(
+    learning_rate=0.13,
+    n_epochs=1000,
+    dataset='../imnet_data/imnet_sample.n3.pkl',
+    label_file='../imnet_data/label_sample.n3.txt',
+    batch_size_min=600,
+    best_model='best_model.pkl',
+    include_bias=True,
+):
     """
     Demonstrate stochastic gradient descent optimization of a log-linear
     model
@@ -269,21 +300,34 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
                  http://www.iro.umontreal.ca/~lisa/deep/data/mnist/mnist.pkl.gz
 
     """
-    datasets = load_data(dataset)
+    logging.info('Loading dataset from {}'.format(dataset))
+    datasets = load_data(dataset, label_file)
+    logging.info('Done loading dataset')
 
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
 
+    num_features = train_set_x.get_value(borrow=True).shape[0]
+    num_samples = train_set_x.get_value(borrow=True).shape[1]
+    num_classes = len(set(train_set_y.owner.inputs[0].get_value(borrow=True)))
+    logging.info('num_features={}, num_samples={}, num_classes={}'.format(num_features, num_samples, num_classes))
+
     # compute number of minibatches for training, validation and testing
-    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size
+    batch_size_train = min(batch_size_min, num_features)
+    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size_train
+    logging.info('train batch_size={}, num_batches={}'.format(batch_size_train, n_train_batches))
+    batch_size_valid = min(batch_size_min, valid_set_x.get_value(borrow=True).shape[0])
+    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size_valid
+    logging.info('validate batch_size={}, num_batches={}'.format(batch_size_valid, n_valid_batches))
+    batch_size_test = min(batch_size_min, test_set_x.get_value(borrow=True).shape[0])
+    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size_test
+    logging.info('test batch_size={}, num_batches={}'.format(batch_size_test, n_test_batches))
 
     ######################
     # BUILD ACTUAL MODEL #
     ######################
-    print '... building the model'
+    logging.info('... building the model')
 
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a [mini]batch
@@ -295,7 +339,7 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
 
     # construct the logistic regression class
     # Each MNIST image has size 28*28
-    classifier = LogisticRegression(input=x, n_in=28 * 28, n_out=10)
+    classifier = LogisticRegression(input=x, n_in=num_samples, n_out=num_classes, include_bias=include_bias)
 
     # the cost we minimize during training is the negative log likelihood of
     # the model in symbolic format
@@ -303,33 +347,44 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
 
     # compiling a Theano function that computes the mistakes that are made by
     # the model on a minibatch
-    test_model = theano.function(
+    get_test_error = theano.function(
         inputs=[index],
         outputs=classifier.errors(y),
         givens={
-            x: test_set_x[index * batch_size: (index + 1) * batch_size],
-            y: test_set_y[index * batch_size: (index + 1) * batch_size]
+            x: test_set_x[index * batch_size_test: (index + 1) * batch_size_test],
+            y: test_set_y[index * batch_size_test: (index + 1) * batch_size_test]
         }
     )
 
-    validate_model = theano.function(
+    get_validate_error = theano.function(
         inputs=[index],
         outputs=classifier.errors(y),
         givens={
-            x: valid_set_x[index * batch_size: (index + 1) * batch_size],
-            y: valid_set_y[index * batch_size: (index + 1) * batch_size]
+            x: valid_set_x[index * batch_size_valid: (index + 1) * batch_size_valid],
+            y: valid_set_y[index * batch_size_valid: (index + 1) * batch_size_valid]
+        }
+    )
+
+    get_train_error = theano.function(
+        inputs=[index],
+        outputs=classifier.errors(y),
+        givens={
+            x: train_set_x[index * batch_size_train: (index + 1) * batch_size_train],
+            y: train_set_y[index * batch_size_train: (index + 1) * batch_size_train]
         }
     )
 
     # compute the gradient of cost with respect to theta = (W,b)
-    g_W = T.grad(cost=cost, wrt=classifier.W)
-    g_b = T.grad(cost=cost, wrt=classifier.b)
+    g_w = T.grad(cost=cost, wrt=classifier.W)
+    if include_bias:
+        g_b = T.grad(cost=cost, wrt=classifier.b)
 
     # start-snippet-3
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs.
-    updates = [(classifier.W, classifier.W - learning_rate * g_W),
-               (classifier.b, classifier.b - learning_rate * g_b)]
+    updates = [(classifier.W, classifier.W - learning_rate * g_w)]
+    if include_bias:
+        updates.append((classifier.b, classifier.b - learning_rate * g_b))
 
     # compiling a Theano function `train_model` that returns the cost, but in
     # the same time updates the parameter of the model based on the rules
@@ -339,8 +394,8 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
         outputs=cost,
         updates=updates,
         givens={
-            x: train_set_x[index * batch_size: (index + 1) * batch_size],
-            y: train_set_y[index * batch_size: (index + 1) * batch_size]
+            x: train_set_x[index * batch_size_train: (index + 1) * batch_size_train],
+            y: train_set_y[index * batch_size_train: (index + 1) * batch_size_train]
         }
     )
     # end-snippet-3
@@ -348,20 +403,18 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
     ###############
     # TRAIN MODEL #
     ###############
-    print '... training the model'
+    logging.info('... training the model')
     # early-stopping parameters
     patience = 5000  # look as this many examples regardless
-    patience_increase = 2  # wait this much longer when a new best is
-                                  # found
-    improvement_threshold = 0.995  # a relative improvement of this much is
-                                  # considered significant
-    validation_frequency = min(n_train_batches, patience / 2)
-                                  # go through this many
-                                  # minibatche before checking the network
-                                  # on the validation set; in this case we
-                                  # check every epoch
+    patience_increase = 2  # wait this much longer when a new best is found
+    # a relative improvement of this much is considered significant
+    improvement_threshold = 0.995
 
-    best_validation_loss = numpy.inf
+    # go through this many minibatches before checking the network
+    # on the validation set; in this case we check every epoch
+    validation_frequency = min(n_train_batches, patience / 2)
+
+    best_validation_loss = np.inf
     test_score = 0.
     start_time = timeit.default_timer()
 
@@ -372,16 +425,17 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
         for minibatch_index in xrange(n_train_batches):
 
             minibatch_avg_cost = train_model(minibatch_index)
+            logging.info('minibatch_avg_cost={}'.format(minibatch_avg_cost))
             # iteration number
-            iter = (epoch - 1) * n_train_batches + minibatch_index
+            iter_num = (epoch - 1) * n_train_batches + minibatch_index
 
-            if (iter + 1) % validation_frequency == 0:
+            if (iter_num + 1) % validation_frequency == 0:
                 # compute zero-one loss on validation set
-                validation_losses = [validate_model(i)
+                validation_losses = [get_validate_error(i)
                                      for i in xrange(n_valid_batches)]
-                this_validation_loss = numpy.mean(validation_losses)
+                this_validation_loss = np.mean(validation_losses)
 
-                print(
+                logging.info(
                     'epoch %i, minibatch %i/%i, validation error %f %%' %
                     (
                         epoch,
@@ -393,19 +447,19 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
 
                 # if we got the best validation score until now
                 if this_validation_loss < best_validation_loss:
-                    #improve patience if loss improvement is good enough
-                    if this_validation_loss < best_validation_loss *  \
-                       improvement_threshold:
-                        patience = max(patience, iter * patience_increase)
+                    # improve patience if loss improvement is good enough
+                    if this_validation_loss < best_validation_loss * improvement_threshold:
+                        logging.info('increasing patience from {} to {}'.format(patience, iter_num * patience_increase))
+                        patience = max(patience, iter_num * patience_increase)
 
                     best_validation_loss = this_validation_loss
                     # test it on the test set
 
-                    test_losses = [test_model(i)
+                    test_losses = [get_test_error(i)
                                    for i in xrange(n_test_batches)]
-                    test_score = numpy.mean(test_losses)
+                    test_score = np.mean(test_losses)
 
-                    print(
+                    logging.info(
                         (
                             '     epoch %i, minibatch %i/%i, test error of'
                             ' best model %f %%'
@@ -419,36 +473,38 @@ def sgd_optimization_mnist(learning_rate=0.13, n_epochs=1000,
                     )
 
                     # save the best model
-                    with open('best_model.pkl', 'w') as f:
+                    with open(best_model, 'w') as f:
                         cPickle.dump(classifier, f)
 
-            if patience <= iter:
+            if patience <= iter_num:
                 done_looping = True
                 break
 
     end_time = timeit.default_timer()
+
+    train_errors = [get_train_error(i) for i in xrange(n_train_batches)]
+    avg_train_error = np.mean(train_errors)
+
     print(
         (
-            'Optimization complete with best validation score of %f %%,'
-            'with test performance %f %%'
+            'Optimization complete with best validation error of %.4f %%,'
+            ' test error of %.4f %%, and train error of %.4f %%'
         )
-        % (best_validation_loss * 100., test_score * 100.)
+        % (best_validation_loss * 100., test_score * 100., avg_train_error * 100.0)
     )
-    print 'The code run for %d epochs, with %f epochs/sec' % (
-        epoch, 1. * epoch / (end_time - start_time))
-    print >> sys.stderr, ('The code for file ' +
-                          os.path.split(__file__)[1] +
-                          ' ran for %.1fs' % ((end_time - start_time)))
+    total_time = end_time - start_time
+    logging.info('Completed {} epochs, at {:.4f} epochs/sec.  Total time {:.2f}s'.format(
+        epoch, 1. * epoch / total_time, total_time))
 
 
-def predict():
+def predict(dataset='mnist.pkl.gz', modelfile='best_model.pkl'):
     """
     An example of how to load a trained model and use it
     to predict labels.
     """
 
     # load the saved model
-    classifier = cPickle.load(open('best_model.pkl'))
+    classifier = cPickle.load(open(modelfile))
 
     # compile a predictor function
     predict_model = theano.function(
@@ -456,7 +512,6 @@ def predict():
         outputs=classifier.y_pred)
 
     # We can test it on some examples from test test
-    dataset='mnist.pkl.gz'
     datasets = load_data(dataset)
     test_set_x, test_set_y = datasets[2]
     test_set_x = test_set_x.get_value()
@@ -466,5 +521,13 @@ def predict():
     print predicted_values
 
 
+def main():
+    log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d %(levelname)s %(message)s'
+    logging.basicConfig(format=log_format, level=logging.DEBUG)
+    logging.info('Running {}'.format(os.path.abspath(__file__)))
+    logging.info('sys.argv: {}'.format(sys.argv))
+    sgd_optimization_mnist(include_bias=False, n_epochs=100)
+
+
 if __name__ == '__main__':
-    sgd_optimization_mnist()
+    main()
