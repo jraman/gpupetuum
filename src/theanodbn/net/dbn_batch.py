@@ -39,6 +39,7 @@ class FeatureSet(object):
     def __init__(self):
         self.x = None
         self.y = None
+        self.yf = None
 
 
 class DbnMegaBatch(object):
@@ -130,7 +131,7 @@ class DbnMegaBatch(object):
             self.mm_train_set.x = np.array([x for x in nn_util.load_pickle_file(fobj)], dtype=theano.config.floatX)
 
         with open(self.label_file, 'r') as ff:
-            self.mm_train_set.y = np.array([int(line.strip()) for line in ff], dtype=np.int32)
+            self.mm_train_set.y = np.array([int(line.strip()) for line in ff], dtype=theano.config.floatX)
 
         # theano requires that the labels be in the range [0, L), where L is the number of unique labels.
         unique_labels = set(self.mm_train_set.y)
@@ -140,7 +141,7 @@ class DbnMegaBatch(object):
         else:
             logging.info('translating labels to range(N)')
             label2idx = dict((ll, ii) for ii, ll in enumerate(unique_labels))
-        self.mm_train_set.y = np.array([label2idx[ll] for ll in self.mm_train_set.y], dtype=np.int32)
+        self.mm_train_set.y = np.array([label2idx[ll] for ll in self.mm_train_set.y], dtype=theano.config.floatX)
 
         self.num_samples = self.mm_train_set.x.shape[0]
         self.num_features = self.mm_train_set.x.shape[1]
@@ -161,12 +162,13 @@ class DbnMegaBatch(object):
 
     def load_data_th(self, borrow=True):
         self.th_train_set = FeatureSet()
-        self.th_train_set.y = theano.shared(
-            np.asarray(self.mm_train_set.y, dtype=theano.config.floatX),
+        mega_batch_y = np.zeros(self.num_samples / self.num_mega_batches)
+        self.th_train_set.yf = theano.shared(
+            np.asarray(mega_batch_y, dtype=theano.config.floatX),
             name='train_set.y',
             borrow=borrow,
         )
-        self.th_train_set.y = T.cast(self.th_train_set.y, 'int32')
+        self.th_train_set.y = T.cast(self.th_train_set.yf, 'int32')
 
         # set up theano shared variables
         mega_batch_x = np.zeros((self.num_samples / self.num_mega_batches, self.num_features))
@@ -317,17 +319,17 @@ class DbnMegaBatch(object):
 
             for mega_batch_index in xrange(self.num_mega_batches):
                 lo, hi = mega_batch_index * mega_batch_size, (mega_batch_index + 1) * mega_batch_size
-                logging.debug('Setting train_set.x[{}:{}]'.format(lo, hi))
+                logging.debug('Setting train_set[{}:{}]'.format(lo, hi))
                 self.th_train_set.x.set_value(self.mm_train_set.x[lo:hi])
+                self.th_train_set.yf.set_value(self.mm_train_set.y[lo:hi])
 
                 for minibatch_index in xrange(self.num_minibatches_in_mega):
                     logging.debug('finetune epoch {}, megabatch {}/{}, minibatch {}/{}'.format(
                         epoch, mega_batch_index + 1, self.num_mega_batches,
                         minibatch_index + 1, self.num_minibatches_in_mega))
                     # ****** execute the update ******
-                    logging.debug2('x_begin/end, y_begin/end={}'.format(
-                        indices(minibatch_index, mega_batch_index)))
-                    minibatch_avg_cost = train_fn(minibatch_index, mega_batch_index)
+                    logging.debug2('x_begin/end, y_begin/end={}'.format(indices(minibatch_index)))
+                    minibatch_avg_cost = train_fn(minibatch_index)
                     logging.debug2('W={}, b={}'.format(
                         self.dbn.logLayer.W[:1, :4].eval(), self.dbn.logLayer.b[:4].eval()))
                     # ********************************
@@ -367,7 +369,7 @@ class DbnMegaBatch(object):
                     #     done_looping = True
                     #     break
 
-                train_loss.extend(train_score(0, self.num_minibatches_in_mega, mega_batch_index))
+                train_loss.extend(train_score(0, self.num_minibatches_in_mega))
                 logging.debug2('train_loss={}'.format(train_loss))
 
             avg_train_loss = np.mean(train_loss)
