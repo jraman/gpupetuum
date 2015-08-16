@@ -6,11 +6,6 @@ to those without visible-visible and hidden-hidden connections.
 """
 import timeit
 
-try:
-    import PIL.Image as Image
-except ImportError:
-    import Image
-
 import numpy
 
 import theano
@@ -19,7 +14,6 @@ import os
 
 from theano.tensor.shared_randomstreams import RandomStreams
 
-from utils import tile_raster_images
 from logistic_sgd import load_data
 
 
@@ -378,6 +372,13 @@ def test_rbm(learning_rate=0.1, training_epochs=15,
     :param n_samples: number of samples to plot for each chain
 
     """
+
+    from utils import tile_raster_images
+    try:
+        import PIL.Image as Image
+    except ImportError:
+        import Image
+
     datasets = load_data(dataset)
 
     train_set_x, train_set_y = datasets[0]

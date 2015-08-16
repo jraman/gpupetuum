@@ -55,12 +55,12 @@ class LogisticRegression(object):
     determine a class membership probability.
     """
 
-    def __init__(self, input, n_in, n_out, include_bias=True):
+    def __init__(self, input_x, n_in, n_out, include_bias=True):
         """ Initialize the parameters of the logistic regression
 
-        :type input: theano.tensor.TensorType
-        :param input: symbolic variable that describes the input of the
-                      architecture (one minibatch)
+        :type input_x: theano.tensor.TensorType
+        :param input_x: symbolic variable that describes the input of the
+                        architecture (one minibatch)
 
         :type n_in: int
         :param n_in: number of input units, the dimension of the space in
@@ -73,6 +73,7 @@ class LogisticRegression(object):
         :type include_bias: boolean
         :param include_bias: add bias term.  By default bias term is excluded.
         """
+        logging.info('LogisticRegression include_bias={}'.format(include_bias))
         # start-snippet-1
         # initialize with 0 the weights W as a matrix of shape (n_in, n_out)
         self.W = theano.shared(
@@ -103,9 +104,9 @@ class LogisticRegression(object):
         # b is a vector where element-k represent the free parameter of
         # hyperplane-k
         if include_bias:
-            self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
+            self.p_y_given_x = T.nnet.softmax(T.dot(input_x, self.W) + self.b)
         else:
-            self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W))
+            self.p_y_given_x = T.nnet.softmax(T.dot(input_x, self.W))
 
         # symbolic description of how to compute prediction as class whose
         # probability is maximal
@@ -113,11 +114,13 @@ class LogisticRegression(object):
         # end-snippet-1
 
         # parameters of the model
-        # self.params = [self.W, self.b]
-        self.params = [self.W, ]
+        if include_bias:
+            self.params = [self.W, self.b]
+        else:
+            self.params = [self.W, ]
 
         # keep track of model input
-        self.input = input
+        self.input = input_x
 
     def negative_log_likelihood(self, y):
         """Return the mean of the negative log-likelihood of the prediction
@@ -176,21 +179,21 @@ class LogisticRegression(object):
             raise NotImplementedError('can handle only int y values at this time')
 
 
-def _shared_dataset(data_x, data_y, borrow=True):
+def _shared_dataset(data_x, data_y, borrow=True, names=(None, None)):
     """ Function that loads the dataset into shared variables
 
     The reason we store our dataset in shared variables is to allow
     Theano to copy it into the GPU memory (when code is run on GPU).
     Since copying data into the GPU is slow, copying a minibatch everytime
-    is needed (the default behaviour if the data is not in a shared
+    it is needed (the default behaviour if the data is not in a shared
     variable) would lead to a large decrease in performance.
     """
-    shared_x = theano.shared(np.asarray(data_x,
-                                        dtype=theano.config.floatX),
-                             borrow=borrow)
-    shared_y = theano.shared(np.asarray(data_y,
-                                        dtype=theano.config.floatX),
-                             borrow=borrow)
+    shared_x = theano.shared(np.asarray(data_x, dtype=theano.config.floatX),
+                             borrow=borrow,
+                             name=names[0])
+    shared_y = theano.shared(np.asarray(data_y, dtype=theano.config.floatX),
+                             borrow=borrow,
+                             name=names[1])
     # When storing data on the GPU it has to be stored as floats
     # therefore we will store the labels as ``floatX`` as well
     # (``shared_y`` does exactly that). But during our computations
@@ -209,7 +212,7 @@ def load_pickle_file(fobj):
             break
 
 
-def load_data(dataset, label_file):
+def load_data(dataset, label_file, valid_size=None, test_size=None):
     ''' Loads the dataset
 
     :type dataset: string
@@ -227,7 +230,7 @@ def load_data(dataset, label_file):
     # LOAD DATA #
     #############
 
-    print '... loading data'
+    logging.info('... loading data')
 
     # Load the dataset
     with open(dataset, 'rb') as fobj:
@@ -237,20 +240,32 @@ def load_data(dataset, label_file):
         train_set_label = np.array([int(line.strip()) for line in ff], dtype=np.int32)
 
     # theano requires that the labels be in the range [0, L), where L is the number of unique labels.
-    label2idx = dict((ll, ii) for ii, ll in enumerate(set(train_set_label)))
+    unique_labels = set(train_set_label)
+    if sorted(unique_labels) == list(unique_labels):
+        logging.info('keeping the labels as is')
+        label2idx = dict((ii, ii) for ii in unique_labels)
+    else:
+        logging.info('translating labels to range(N)')
+        label2idx = dict((ll, ii) for ii, ll in enumerate(unique_labels))
     train_set_y = np.array([label2idx[ll] for ll in train_set_label], dtype=np.int32)
 
-    nrow = train_set_x.shape[0]
+    nrow, ncol = train_set_x.shape[0], train_set_x.shape[1]
     assert nrow == train_set_y.shape[0], "Num rows in X and Y don't match"
+
+    logging.info('Number of training samples={}, num features={}'.format(nrow, ncol))
 
     # with replacement
     np.random.seed(4242)
-    valid_set_idx = np.random.choice(nrow, 0.3 * nrow)
+    valid_size = valid_size or round(0.3 * nrow)
+    valid_set_idx = np.random.choice(nrow, valid_size)
+    logging.warning('one time change')      # @todo
+    valid_set_idx = range(94, 188)
     valid_set_x, valid_set_y = train_set_x[valid_set_idx], train_set_y[valid_set_idx]
     logging.info('Selected {} rows as validation set'.format(len(valid_set_idx)))
 
     np.random.seed(4343)
-    test_set_idx = np.random.choice(nrow, 0.2 * nrow)
+    test_size = test_size or (0.2 * nrow)
+    test_set_idx = np.random.choice(nrow, test_size)
     test_set_x, test_set_y = train_set_x[test_set_idx], train_set_y[test_set_idx]
     logging.info('Selected {} rows as test set'.format(len(test_set_idx)))
 
@@ -261,9 +276,9 @@ def load_data(dataset, label_file):
     # the number of rows in the input. The target should be associated
     # with the same index in the input.
 
-    shared_train_set_x, shared_train_set_y = _shared_dataset(train_set_x, train_set_y)
-    shared_valid_set_x, shared_valid_set_y = _shared_dataset(valid_set_x, valid_set_y)
-    shared_test_set_x, shared_test_set_y = _shared_dataset(test_set_x, test_set_y)
+    shared_train_set_x, shared_train_set_y = _shared_dataset(train_set_x, train_set_y, names=['train.X', 'train.y'])
+    shared_valid_set_x, shared_valid_set_y = _shared_dataset(valid_set_x, valid_set_y, names=['valid.X', 'valid.y'])
+    shared_test_set_x, shared_test_set_y = _shared_dataset(test_set_x, test_set_y, names=['test.X', 'test.y'])
 
     rval = [
         (shared_train_set_x, shared_train_set_y),
@@ -308,13 +323,13 @@ def sgd_optimization_mnist(
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
 
-    num_features = train_set_x.get_value(borrow=True).shape[0]
-    num_samples = train_set_x.get_value(borrow=True).shape[1]
+    num_samples = train_set_x.get_value(borrow=True).shape[0]
+    num_features = train_set_x.get_value(borrow=True).shape[1]
     num_classes = len(set(train_set_y.owner.inputs[0].get_value(borrow=True)))
-    logging.info('num_features={}, num_samples={}, num_classes={}'.format(num_features, num_samples, num_classes))
+    logging.info('num_samples={}, num_features={}, num_classes={}'.format(num_samples, num_features, num_classes))
 
     # compute number of minibatches for training, validation and testing
-    batch_size_train = min(batch_size_min, num_features)
+    batch_size_train = min(batch_size_min, num_samples)
     n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size_train
     logging.info('train batch_size={}, num_batches={}'.format(batch_size_train, n_train_batches))
     batch_size_valid = min(batch_size_min, valid_set_x.get_value(borrow=True).shape[0])
@@ -339,7 +354,7 @@ def sgd_optimization_mnist(
 
     # construct the logistic regression class
     # Each MNIST image has size 28*28
-    classifier = LogisticRegression(input=x, n_in=num_samples, n_out=num_classes, include_bias=include_bias)
+    classifier = LogisticRegression(input=x, n_in=num_features, n_out=num_classes, include_bias=include_bias)
 
     # the cost we minimize during training is the negative log likelihood of
     # the model in symbolic format
