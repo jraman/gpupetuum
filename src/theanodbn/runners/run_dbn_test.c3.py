@@ -1,5 +1,7 @@
 '''
 Bare bones run with small number of hidden units, pretrain epochs and finetune epochs.
+When comparing with and without mega-batches, only the last mega-batch and its corresponding
+numbers from the without scenario can be compared.
 '''
 
 import logging
