@@ -1,3 +1,9 @@
+'''
+Bare bones run with small number of hidden units, pretrain epochs and finetune epochs.
+When comparing with and without mega-batches, only the last mega-batch and its corresponding
+numbers from the without scenario can be compared.
+'''
+
 import logging
 import os
 import sys
@@ -8,7 +14,6 @@ sys.path.append(path1)
 
 def relpath(dirname):
     return os.path.abspath(os.path.join(path1, '..', dirname))
-
 
 from net import dbn_batch
 

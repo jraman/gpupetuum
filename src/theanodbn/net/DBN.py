@@ -314,7 +314,6 @@ class DBN(object):
         # (test_set_x, test_set_y) = datasets[2]
 
         mini_index = T.lscalar('mini_index')  # index to a [mini]batch
-        mega_index = T.lscalar('mega_index')
 
         # compute the gradients with respect to the model parameters
         gparams = T.grad(self.finetune_cost, self.params)
@@ -329,11 +328,11 @@ class DBN(object):
         x_begin = mini_index * mini_batch_size
         x_end = x_begin + mini_batch_size
 
-        y_begin = mega_index * mega_batch_size + mini_index * mini_batch_size
+        y_begin = mini_index * mini_batch_size
         y_end = y_begin + mini_batch_size
 
         train_fn = theano.function(
-            inputs=[mini_index, mega_index],
+            inputs=[mini_index],
             outputs=self.finetune_cost,
             updates=updates,
             givens={
@@ -343,7 +342,7 @@ class DBN(object):
         )
 
         train_score_i = theano.function(
-            inputs=[mini_index, mega_index],
+            inputs=[mini_index],
             outputs=self.errors,
             givens={
                 self.x: train_set_x[x_begin:x_end],
@@ -370,14 +369,13 @@ class DBN(object):
         # )
 
         # Create a function that scans the entire training set
-        def train_score(mini_idx_begin, mini_idx_end, mega_index):
+        def train_score(mini_idx_begin, mini_idx_end):
             '''inclusive of mini_idx_begin and exclusive of mini_idx_end'''
-            logging.debug('mini_idx_begin={}, end={}, mega_index={}'.format(
-                mini_idx_begin, mini_idx_end, mega_index))
-            return [train_score_i(i, mega_index) for i in xrange(mini_idx_begin, mini_idx_end)]
+            logging.debug2('mini_idx_begin={}, end={}'.format(mini_idx_begin, mini_idx_end))
+            return [train_score_i(i) for i in xrange(mini_idx_begin, mini_idx_end)]
 
         f1 = theano.function(
-            inputs=[mini_index, mega_index],
+            inputs=[mini_index],
             outputs=[x_begin, x_end, y_begin, y_end]
         )
 
@@ -552,8 +550,10 @@ def test_dbn(
             logging.debug('finetune epoch {}, minibatch {}/{}'.format(epoch, minibatch_index + 1, n_train_batches))
             # ****** execute the update ******
             minibatch_avg_cost = train_fn(minibatch_index)
-            logging.debug2('W={}, b={}'.format(
-                           dbn.logLayer.W[:1, :4].eval(), dbn.logLayer.b[:4].eval()))
+            logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
+                dbn.sigmoid_layers[0].W[:1, :4].eval(), dbn.sigmoid_layers[0].b[:4].eval()))
+            logging.debug2('logLayer W[:1, :4]={}, b[:4]={}'.format(
+                dbn.logLayer.W[:1, :4].eval(), dbn.logLayer.b[:4].eval()))
             # ********************************
             logging.info('minibatch_avg_cost={}'.format(minibatch_avg_cost))
             iter_num = (epoch - 1) * n_train_batches + minibatch_index

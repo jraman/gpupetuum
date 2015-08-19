@@ -1,6 +1,7 @@
 '''
 Bare bones run with small number of hidden units, pretrain epochs and finetune epochs.
-Also, large batch_size.
+When comparing with and without mega-batches, only the last mega-batch and its corresponding
+numbers from the without scenario can be compared.
 '''
 
 import logging
@@ -10,6 +11,10 @@ import sys
 path1 = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(path1)
 
+
+def relpath(dirname):
+    return os.path.abspath(os.path.join(path1, '..', dirname))
+
 from net import DBN
 
 os.environ['THEANO_FLAGS'] = 'mode=FAST_RUN,device=gpu,floatX=float32'
@@ -17,10 +22,10 @@ os.environ['THEANO_FLAGS'] = 'mode=FAST_RUN,device=gpu,floatX=float32'
 log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d %(levelname)s %(message)s'
 logging.basicConfig(format=log_format, level=1)
 
-dataset_file = '../imnet_data/imnet_sample.n3.pkl'
-label_file = '../imnet_data/label_sample.n3.txt'
-pretrain_model_file = '../model/dbn.pretrain.test3.pkl'
-finetuned_model_file = '../model/dbn.finetuned.test3.pkl'
+dataset_file = relpath('imnet_data/imnet_sample.n3.pkl')
+label_file = relpath('imnet_data/label_sample.n3.txt')
+pretrain_model_file = relpath('model/dbn.pretrain.test3.pkl')
+finetuned_model_file = relpath('model/dbn.finetuned.test3.pkl')
 
 hidden_layers_sizes = [128]
 pretraining_epochs = 4

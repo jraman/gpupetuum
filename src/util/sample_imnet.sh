@@ -5,7 +5,8 @@ NUMSAMPLES=$1
 [ "x$NUMSAMPLES" = "x" ] && { echo "Need NUMSAMPLES"; exit 1; }
 [ $(( $NUMSAMPLES + 0 )) = $NUMSAMPLES ] || { echo "NUMSAMPLES must be a number"; exit 1; }
 
-DATADIR="../imnet_data"
+THISDIR=$(cd $(dirname $0) && pwd)
+DATADIR="$THISDIR/../imnet_data"
 LABELFILE="$DATADIR/0_label.txt"
 DATAFILE="$DATADIR/imnet_0.bin"
 
@@ -18,4 +19,4 @@ set -x
 
 head -n $NUMSAMPLES $LABELFILE > $SELECTLABELFILE
 
-python pickle_llc.py $DATAFILE $LABELFILE $OUTFILE $SELECTLABELFILE $OUTLABELFILE
+python ${THISDIR}/pickle_llc.py $DATAFILE $LABELFILE $OUTFILE $SELECTLABELFILE $OUTLABELFILE
