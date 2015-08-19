@@ -550,8 +550,10 @@ def test_dbn(
             logging.debug('finetune epoch {}, minibatch {}/{}'.format(epoch, minibatch_index + 1, n_train_batches))
             # ****** execute the update ******
             minibatch_avg_cost = train_fn(minibatch_index)
-            logging.debug2('W={}, b={}'.format(
-                           dbn.logLayer.W[:1, :4].eval(), dbn.logLayer.b[:4].eval()))
+            logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
+                dbn.sigmoid_layers[0].W[:1, :4].eval(), dbn.sigmoid_layers[0].b[:4].eval()))
+            logging.debug2('logLayer W[:1, :4]={}, b[:4]={}'.format(
+                dbn.logLayer.W[:1, :4].eval(), dbn.logLayer.b[:4].eval()))
             # ********************************
             logging.info('minibatch_avg_cost={}'.format(minibatch_avg_cost))
             iter_num = (epoch - 1) * n_train_batches + minibatch_index

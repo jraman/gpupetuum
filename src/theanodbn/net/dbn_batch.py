@@ -330,7 +330,9 @@ class DbnMegaBatch(object):
                     # ****** execute the update ******
                     logging.debug2('x_begin/end, y_begin/end={}'.format(indices(minibatch_index)))
                     minibatch_avg_cost = train_fn(minibatch_index)
-                    logging.debug2('W={}, b={}'.format(
+                    logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
+                        self.dbn.sigmoid_layers[0].W[:1, :4].eval(), self.dbn.sigmoid_layers[0].b[:4].eval()))
+                    logging.debug2('logLayer W[:1, :4]={}, b[:4]={}'.format(
                         self.dbn.logLayer.W[:1, :4].eval(), self.dbn.logLayer.b[:4].eval()))
                     # ********************************
                     logging.info('minibatch_avg_cost={}'.format(minibatch_avg_cost))

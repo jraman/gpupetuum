@@ -1,3 +1,7 @@
+'''
+Bare bones run with small number of hidden units, pretrain epochs and finetune epochs.
+'''
+
 import logging
 import os
 import sys
@@ -8,7 +12,6 @@ sys.path.append(path1)
 
 def relpath(dirname):
     return os.path.abspath(os.path.join(path1, '..', dirname))
-
 
 from net import dbn_batch
 
