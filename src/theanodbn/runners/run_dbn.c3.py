@@ -11,7 +11,7 @@ def relpath(dirname):
 
 from net import DBN
 
-os.environ['THEANO_FLAGS'] = 'mode=FAST_RUN,device=cpu,floatX=float32'
+os.environ['THEANO_FLAGS'] = 'mode=FAST_RUN,device=gpu,floatX=float32'
 
 log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d %(levelname)s %(message)s'
 logging.basicConfig(format=log_format, level=logging.DEBUG)
@@ -22,11 +22,11 @@ pretrain_model_file = relpath('model/dbn.pretrain.n3.pkl')
 finetuned_model_file = relpath('model/dbn.finetuned.n3.pkl')
 
 hidden_layers_sizes = [2048]
-pretraining_epochs = 10
+pretraining_epochs = 100
 pretrain_lr = 0.05
 cd_k = 1
 finetune_training_epochs = 100
-finetune_lr = 0.1
+finetune_lr = 0.01
 batch_size = 188 / 2 / 2
 numpy_rng_seed = 4242
 
