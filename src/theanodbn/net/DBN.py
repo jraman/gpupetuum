@@ -256,6 +256,9 @@ class DBN(object):
             }
         )
 
+        train_score_cross_entropy_i = theano.function(
+        )
+
         valid_score_i = theano.function(
             inputs=[index],
             outputs=self.errors,
