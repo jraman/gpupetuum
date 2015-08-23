@@ -1,10 +1,10 @@
 
 class DbnConfig(object):
     # paths are relative to location of this conf file
-    dataset_file = '../imnet_data/imnet_sample.n3.pkl'
-    label_file = '../imnet_data/label_sample.n3.txt'
-    pretrain_model_file = '../model/dbn_batch.pretrain.test3.pkl'
-    finetuned_model_file = '../model/dbn_batch.finetuned.test3.pkl'
+    dataset_file = '../../imnet_data/imnet_sample.n3.pkl'
+    label_file = '../../imnet_data/label_sample.n3.txt'
+    pretrain_model_file = '../../model/dbn_batch.pretrain.test3.pkl'
+    finetuned_model_file = '../../model/dbn_batch.finetuned.test3.pkl'
 
     hidden_layers_sizes = [2048]
     pretraining_epochs = 100
