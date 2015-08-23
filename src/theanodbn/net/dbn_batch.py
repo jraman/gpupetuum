@@ -119,7 +119,7 @@ class DbnMegaBatch(object):
         logging.info('THEANO_FLAGS={}'.format(os.getenv('THEANO_FLAGS')))
         self.load_data_mm()
         self.build_model()
-        self.load_data_th()
+        self.setup_shared_xy()
         self.pretrain()
         self.finetune()
 
@@ -160,7 +160,11 @@ class DbnMegaBatch(object):
         msg = 'num_samples must be an integer multiple of num_mega_batches'
         assert self.num_samples / self.num_mega_batches * self.num_mega_batches == self.num_samples, msg
 
-    def load_data_th(self, borrow=True):
+    def setup_shared_xy(self, borrow=True):
+        '''Set up theano shared variables for input X and output y.
+        X is a matrix of num_samples_per_mega_batch x num_features
+        y is a vector of num_samples_per_mega_batch x 1
+        '''
         self.th_train_set = FeatureSet()
         mega_batch_y = np.zeros(self.num_samples / self.num_mega_batches)
         self.th_train_set.yf = theano.shared(
