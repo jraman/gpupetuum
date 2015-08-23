@@ -119,7 +119,7 @@ class DbnMegaBatch(object):
         logging.info('THEANO_FLAGS={}'.format(os.getenv('THEANO_FLAGS')))
         self.load_data_mm()
         self.build_model()
-        self.load_data_th()
+        self.setup_shared_xy()
         self.pretrain()
         self.finetune()
 
@@ -160,7 +160,11 @@ class DbnMegaBatch(object):
         msg = 'num_samples must be an integer multiple of num_mega_batches'
         assert self.num_samples / self.num_mega_batches * self.num_mega_batches == self.num_samples, msg
 
-    def load_data_th(self, borrow=True):
+    def setup_shared_xy(self, borrow=True):
+        '''Set up theano shared variables for input X and output y.
+        X is a matrix of num_samples_per_mega_batch x num_features
+        y is a vector of num_samples_per_mega_batch x 1
+        '''
         self.th_train_set = FeatureSet()
         mega_batch_y = np.zeros(self.num_samples / self.num_mega_batches)
         self.th_train_set.yf = theano.shared(
@@ -207,6 +211,9 @@ class DbnMegaBatch(object):
             n_outs=self.num_classes
         )
 
+        logging.info('Param shapes: {}'.format(
+            ', '.join(['{}:{}'.format(p, p.shape.eval()) for p in self.dbn.params])))
+
     def pretrain(self):
         # start-snippet-2
         #########################
@@ -251,7 +258,12 @@ class DbnMegaBatch(object):
                             self.dbn.rbm_layers[0].vbias[:4].eval()))
 
                 logging.debug2('cost: {}'.format(cc))
-                logging.info('Pre-training layer {:d}, epoch {:d}, avg cost {}'.format(layer_idx, epoch, np.mean(cc)))
+                logging.info('pre-train layer {:d}, epoch {:d}, avg cost {}'.format(layer_idx, epoch, np.mean(cc)))
+
+                l2 = [p.norm(2).eval() for p in self.dbn.params]
+                l2all = np.sqrt(sum(x * x for x in l2))
+                logging.info('pre-train layer {:d}, epoch {}, L2 norms: all={}, individual={}'.format(
+                    layer_idx, epoch, l2all, ', '.join(str(x) for x in l2)))
 
         end_time = timeit.default_timer()
         # end-snippet-2
@@ -302,8 +314,6 @@ class DbnMegaBatch(object):
         logging.info('patience={}, patience_increase={}, improvement_threshold={:.4f}, validation_frequency={}'.format(
             patience, patience_increase, improvement_threshold, validation_frequency))
 
-        best_validation_loss = np.inf
-        avg_test_loss = 0.
         start_time = timeit.default_timer()
 
         done_looping = False
@@ -336,46 +346,17 @@ class DbnMegaBatch(object):
                         self.dbn.logLayer.W[:1, :4].eval(), self.dbn.logLayer.b[:4].eval()))
                     # ********************************
                     logging.info('minibatch_avg_cost={}'.format(minibatch_avg_cost))
-                    # iter_num = (epoch - 1) * self.num_minibatches_in_mega + minibatch_index
-
-                    # if (iter_num + 1) % validation_frequency == 0:
-                    #     logging.debug('VALIDATION finetune epoch {}, megabatch {}, minibatch {}, iter_num {}'.format(
-                    #         epoch, mega_batch_index, minibatch_index, iter_num))
-                    #     import pdb; pdb.set_trace()
-                    #     validation_losses = validate_score(0, self.num_minibatches_in_mega - 1, mega_batch_index)
-                    #     this_validation_loss = np.mean(validation_losses)
-                    #     logging.info('epoch {:d}, minibatch {:d}/{:d}, validation error {:f} %'.format(
-                    #         epoch, minibatch_index + 1, self.num_minibatches_in_mega, this_validation_loss * 100.))
-
-                    #     # if we got the best validation score until now
-                    #     if this_validation_loss < best_validation_loss:
-
-                    #         # improve patience if loss improvement is good enough
-                    #         if (
-                    #             this_validation_loss < best_validation_loss *
-                    #             improvement_threshold
-                    #         ):
-                    #             patience = max(patience, iter_num * patience_increase)
-
-                    #         # save best validation score and iteration number
-                    #         best_validation_loss = this_validation_loss
-                    #         best_iter = iter_num
-
-                    #         # test it on the test set
-                    #         test_losses = test_score(num_test_batches)
-                    #         avg_test_loss = np.mean(test_losses)
-                    #         logging.info('     epoch {:d}, minibatch {:d}/{:d}, test error of best model {} %'.format(
-                    #             epoch, minibatch_index + 1, self.num_minibatches_in_mega, avg_test_loss * 100.))
-
-                    # if patience <= iter_num:
-                    #     done_looping = True
-                    #     break
 
                 train_loss.extend(train_score(0, self.num_minibatches_in_mega))
                 logging.debug2('train_loss={}'.format(train_loss))
 
+            l2 = [p.norm(2).eval() for p in self.dbn.params]
+            l2all = np.sqrt(sum(x * x for x in l2))
+            logging.info('epoch {}: L2 norms: all={}, individual={}'.format(
+                epoch, l2all, ', '.join(str(x) for x in l2)))
+
             avg_train_loss = np.mean(train_loss)
-            logging.info('avg_train_loss={}'.format(avg_train_loss))
+            logging.info('epoch {}: avg_train_loss={}'.format(epoch, avg_train_loss))
             if avg_train_loss < best_train_loss:
                 if avg_train_loss < best_train_loss * improvement_threshold:
                     patience = max(patience, epoch * patience_increase)
@@ -386,12 +367,7 @@ class DbnMegaBatch(object):
                 break
 
         end_time = timeit.default_timer()
-        logging.info(
-            (
-                'Optimization complete with avg train error of %f %%, best validation error of %f %%, '
-                'obtained at iteration %i, with avg test error %f %%'
-            ) % (avg_train_loss * 100., best_validation_loss * 100., epoch, avg_test_loss * 100.)
-        )
+        logging.info('Optimization complete with avg train error of {:f} %'.format(avg_train_loss * 100.))
         logging.info('The fine tuning code ran for {:.2f}m'.format((end_time - start_time) / 60.))
 
         logging.info('Saving finetuned model file to {}'.format(self.finetuned_model_file))

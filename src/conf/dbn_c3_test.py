@@ -11,10 +11,10 @@ or rambatch (mini-batch with all data loaded in CPU RAM and transferred back and
 class DbnConfig(object):
     loglevel = 1
 
-    dataset_file = '../imnet_data/imnet_sample.n3.pkl'
-    label_file = '../imnet_data/label_sample.n3.txt'
-    pretrain_model_file = '../model/dbn.pretrain.test3.pkl'
-    finetuned_model_file = '../model/dbn.finetuned.test3.pkl'
+    dataset_file = '../../imnet_data/imnet_sample.n3.pkl'
+    label_file = '../../imnet_data/label_sample.n3.txt'
+    pretrain_model_file = '../../model/dbn.pretrain.test3.pkl'
+    finetuned_model_file = '../../model/dbn.finetuned.test3.pkl'
 
     hidden_layers_sizes = [128]
     pretraining_epochs = 4
