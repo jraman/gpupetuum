@@ -147,7 +147,8 @@ class DBN(object):
         # compute the gradients with respect to the model parameters
         # symbolic variable that points to the number of errors made on the
         # minibatch given by self.x and self.y
-        self.errors = self.logLayer.errors(self.y)
+        self.errors = self.logLayer.errors_cross_entropy(self.y)
+        #self.errors_cross_entropy = self.logLayer.errors_cross_entropy(self.y)
 
     def pretraining_functions(self, train_set_x, batch_size, k):
         '''Generates a list of functions, for performing one step of
@@ -256,6 +257,15 @@ class DBN(object):
             }
         )
 
+#        train_score_cross_entropy_i = theano.function(
+#            inputs=[index],
+#            outputs=self.errors_cross_entropy,
+#            givens={
+#                self.x: train_set_x[index * batch_size: (index + 1) * batch_size],
+#                self.y: train_set_y[index * batch_size: (index + 1) * batch_size]
+#            }
+#        )
+
         valid_score_i = theano.function(
             inputs=[index],
             outputs=self.errors,
@@ -277,6 +287,10 @@ class DBN(object):
         # Create a function that scans the entire training set
         def train_score():
             return [train_score_i(i) for i in xrange(n_train_batches)]
+
+#        # Create a function that scans the entire training set
+#        def train_score_cross_entropy():
+#            return [train_score_cross_entropy_i(i) for i in xrange(n_train_batches)]
 
         # Create a function that scans the entire validation set
         def valid_score():
@@ -350,6 +364,15 @@ class DBN(object):
             }
         )
 
+#        train_score_cross_entropy_i = theano.function(
+#            inputs=[mini_index],
+#            outputs=self.errors_cross_entropy,
+#            givens={
+#                self.x: train_set_x[x_begin:x_end],
+#                self.y: train_set_y[y_begin:y_end]
+#            }
+#        )
+
         # valid_score_i = theano.function(
         #     inputs=[mini_index, mega_index],
         #     outputs=self.errors,
@@ -373,6 +396,12 @@ class DBN(object):
             '''inclusive of mini_idx_begin and exclusive of mini_idx_end'''
             logging.debug2('mini_idx_begin={}, end={}'.format(mini_idx_begin, mini_idx_end))
             return [train_score_i(i) for i in xrange(mini_idx_begin, mini_idx_end)]
+
+#        # Create a function that scans the entire training set
+#        def train_score_cross_entropy(mini_idx_begin, mini_idx_end):
+#            '''inclusive of mini_idx_begin and exclusive of mini_idx_end'''
+#            logging.debug2('mini_idx_begin={}, end={}'.format(mini_idx_begin, mini_idx_end))
+#            return [train_score_cross_entropy_i(i) for i in xrange(mini_idx_begin, mini_idx_end)]
 
         f1 = theano.function(
             inputs=[mini_index],
