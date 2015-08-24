@@ -404,7 +404,6 @@ class DBN(object):
 #            return [train_score_cross_entropy_i(i) for i in xrange(mini_idx_begin, mini_idx_end)]
 
         f1 = theano.function(
-        f1 = theano.function(
             inputs=[mini_index],
             outputs=[x_begin, x_end, y_begin, y_end]
         )
