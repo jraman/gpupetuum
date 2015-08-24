@@ -1,5 +1,4 @@
 '''
-Bare bones run with small number of hidden units, pretrain epochs and finetune epochs.
 When comparing with and without mega-batches, only the last mega-batch and its corresponding
 numbers from the without scenario can be compared.
 '''
@@ -23,7 +22,8 @@ from net import dbn_batch
 
 def relpath(basepath, datafilepath):
     'helper function to resolve datafilepath'
-    return os.path.abspath(os.path.join(path1, datafilepath))
+    # datafilepath can be None, in which case return None
+    return datafilepath and os.path.abspath(os.path.join(path1, datafilepath))
 
 conf_filepath = sys.argv[1]
 conf_dir, conf_basename = os.path.dirname(conf_filepath), os.path.basename(conf_filepath)
@@ -42,6 +42,7 @@ runner = dbn_batch.DbnMegaBatch(
     label_file=relpath(conf_dir, conf.label_file),
     pretrain_model_file=relpath(conf_dir, conf.pretrain_model_file),
     finetuned_model_file=relpath(conf_dir, conf.finetuned_model_file),
+    load_from=conf.load_from,
     hidden_layers_sizes=conf.hidden_layers_sizes,
     pretraining_epochs=conf.pretraining_epochs,
     pretrain_lr=conf.pretrain_lr,

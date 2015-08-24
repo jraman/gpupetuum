@@ -19,12 +19,10 @@ with open(filename) as fin:
             fvec = pickle.load(fin)
         except EOFError:
             print 'Last feature vector:'
-            print fvec
             print fvec[:10]
             break
         if ii == 0:
             print 'First feature vector:'
-            print fvec
             print fvec[:10]
         ref_veclen = ref_veclen or len(fvec)
         assert ref_veclen == len(fvec), 'inconsistent vector length: found {}, expected {}, vector num: {}'.format(
