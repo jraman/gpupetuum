@@ -7,6 +7,7 @@ Notes:
  * We use parts of the last megabatch as validation and test sets.
 '''
 
+import csv
 import logging
 import numpy as np
 import os
@@ -42,6 +43,38 @@ class FeatureSet(object):
         self.yf = None
 
 
+class LoadFrom(object):
+    RAM = 'RAM'
+    disk = 'disk'
+
+
+class DiskLoader(object):
+    def __init__(self, dataset_list_file):
+        assert os.path.exists(dataset_list_file), 'Cannot find file {}'.format(dataset_list_file)
+        self._dataset_list_file = dataset_list_file
+        self._files = None
+        with open(self._dataset_list_file) as fobj:
+            reader = csv.reader(fobj)
+            self._files = [row for row in reader if row and not row[0].startswith('#')]
+
+        for row in self._files:
+            assert len(row) == 2, 'Expected 2 filenames.  Got {}'.format(row)
+            datafile, labelfile = row
+            assert os.path.exists(datafile), 'Cannot find file {}'.format(datafile)
+            assert os.path.exists(labelfile), 'Cannot find file {}'.format(labelfile)
+
+        self._datafiles = [r[0] for r in self._files]
+        self._labelfiles = [r[1] for r in self._files]
+
+    @property
+    def datafiles(self):
+        return self._datafiles
+
+    @property
+    def labelfiles(self):
+        return self._labelfiles
+
+
 class DbnMegaBatch(object):
     def __init__(
         self,
@@ -49,19 +82,28 @@ class DbnMegaBatch(object):
         label_file,
         pretrain_model_file,
         finetuned_model_file,
+        load_from='RAM',
         hidden_layers_sizes=[1024],
         pretraining_epochs=100,
         pretrain_lr=0.01,
         k=1,
         finetune_training_epochs=1000,
         finetune_lr=0.1,
-        num_mega_batches=1,
+        dataset_dir=None,
+        num_mega_batches=None,
         batch_size=10,
         numpy_rng_seed=4242,
         valid_size=None,
         test_size=None,
     ):
         """
+        Either:
+         * Load to RAM and transfer as neeeded to GPU/CPU (shared variable), or
+            - specify num_mega_batches
+         * Load from disk and transfer to GPU/CPU (shared variable).
+            - dataset_file is a text file listing tuples of (binary dataset_file, label_file)
+            - label_file is None
+
         Demonstrates how to train and test a Deep Belief Network.
 
         :type finetune_lr: float
@@ -79,6 +121,9 @@ class DbnMegaBatch(object):
         :type batch_size: int
         :param batch_size: the size of a minibatch
         """
+        assert load_from in (LoadFrom.RAM, LoadFrom.disk), 'Can only load from {} or {}, not {}'.format(
+            LoadFrom.RAM, LoadFrom.disk, load_from)
+
         logging.info('hidden_layers_sizes={}'.format(hidden_layers_sizes))
         logging.info('pretraining_epochs={}'.format(pretraining_epochs))
         logging.info('pretrain_lr={}'.format(pretrain_lr))
@@ -95,6 +140,7 @@ class DbnMegaBatch(object):
         self.label_file = label_file
         self.pretrain_model_file = pretrain_model_file
         self.finetuned_model_file = finetuned_model_file
+        self.load_from = load_from
         self.hidden_layers_sizes = hidden_layers_sizes
         self.pretraining_epochs = pretraining_epochs
         self.pretrain_lr = pretrain_lr
@@ -104,8 +150,8 @@ class DbnMegaBatch(object):
         self.num_mega_batches = num_mega_batches
         self.batch_size = batch_size
         self.numpy_rng_seed = numpy_rng_seed
-        self.valid_size = valid_size
-        self.test_size = test_size
+        self.valid_size = valid_size or 0
+        self.test_size = test_size or 0
 
         self.num_samples = 0
         self.num_features = 0
@@ -113,15 +159,52 @@ class DbnMegaBatch(object):
         self.num_minibatches = 0                # across all mega
         self.num_minibatches_in_mega = 0        # num batches in a mega batch
         self.mm_train_set = FeatureSet()
+
+        if load_from == LoadFrom.disk:
+            self.disk_loader = DiskLoader(dataset_file)
+        else:
+            self.disk_loader = None
+
         self.dbn = None
 
     def run(self):
         logging.info('THEANO_FLAGS={}'.format(os.getenv('THEANO_FLAGS')))
-        self.load_data_mm()
+        if self.load_from == LoadFrom.RAM:
+            self.load_data_mm()
+        else:
+            self.prepare()
         self.build_model()
         self.setup_shared_xy()
         self.pretrain()
         self.finetune()
+
+    def prepare(self):
+        '''Set num_samples, num_mega_batches, num_features
+        Read one file and set num_features, etc.
+        This is a bit underoptimized.  We end up loading the first set of files twice - once here and
+        once at start of pretraining.
+        '''
+        with open(self.disk_loader.datafiles[0], 'rb') as fobj:
+            self.num_features = len(nn_util.load_pickle_file(fobj).next())
+            self.num_samples = 1 + sum(1 for x in nn_util.load_pickle_file(fobj))
+        self.num_minibatches = len(self.disk_loader.datafiles)
+        self.num_samples *= self.num_minibatches
+        with open(self.label_file) as fobj:
+            labels = [int(x.strip()) for x in fobj]
+        self.num_classes = len(labels)
+        self._label2idx = dict([(ll, ii) for ii, ll in enumerate(sorted(labels))])
+        logging.info('num_samples={}, num_features={}, num_classes={}'.format(
+            self.num_samples, self.num_features, self.num_classes))
+
+        with open(self.disk_loader.labelfiles[0]) as fobj:
+            num_y_samples = sum(1 for x in fobj)
+        num_y_samples *= len(self.disk_loader.labelfiles)
+        assert self.num_samples == num_y_samples, "Num rows in X and Y don't match"
+
+        self.num_minibatches = self.num_samples / self.batch_size
+        self.num_minibatches_in_mega = self.num_samples / self.batch_size / self.num_mega_batches
+        logging.info('num_minibatches={}, num_minibatches_in_mega={}'.format(
+            self.num_minibatches, self.num_minibatches_in_mega))
 
     def load_data_mm(self):
         '''Load all of input data into main memory.
@@ -140,7 +223,7 @@ class DbnMegaBatch(object):
             label2idx = dict((ii, ii) for ii in unique_labels)
         else:
             logging.info('translating labels to range(N)')
-            label2idx = dict((ll, ii) for ii, ll in enumerate(unique_labels))
+            label2idx = dict((ll, ii) for ii, ll in enumerate(sorted(unique_labels)))
         self.mm_train_set.y = np.array([label2idx[ll] for ll in self.mm_train_set.y], dtype=theano.config.floatX)
 
         self.num_samples = self.mm_train_set.x.shape[0]
@@ -152,6 +235,7 @@ class DbnMegaBatch(object):
         assert self.num_samples == self.mm_train_set.y.shape[0], "Num rows in X and Y don't match"
 
         assert self.num_samples % self.batch_size == 0, 'num_samples not a int multiple of batch_size'
+
         self.num_minibatches = self.num_samples / self.batch_size
         self.num_minibatches_in_mega = self.num_samples / self.batch_size / self.num_mega_batches
         logging.info('num_minibatches={}, num_minibatches_in_mega={}'.format(
@@ -214,6 +298,38 @@ class DbnMegaBatch(object):
         logging.info('Param shapes: {}'.format(
             ', '.join(['{}:{}'.format(p, p.shape.eval()) for p in self.dbn.params])))
 
+    def load_shared_from_ram(self, mega_batch_index, load_y):
+        '''Load data from main memory to theano shared variable.
+        '''
+        mega_batch_size = self.num_samples / self.num_mega_batches
+        lo, hi = mega_batch_index * mega_batch_size, (mega_batch_index + 1) * mega_batch_size
+        logging.debug('Setting train_set.x[{}:{}]'.format(lo, hi))
+        self.th_train_set.x.set_value(self.mm_train_set.x[lo:hi])
+        if load_y:
+            self.th_train_set.yf.set_value(self.mm_train_set.y[lo:hi])
+
+    def load_shared_from_disk(self, mega_batch_index, load_y):
+        datafile = self.disk_loader.datafiles[mega_batch_index]
+        with open(datafile, 'rb') as fobj:
+            xx = np.array([x for x in nn_util.load_pickle_file(fobj)], dtype=theano.config.floatX)
+        logging.debug('Loaded {}'.format(datafile))
+
+        self.th_train_set.x.set_value(xx)
+
+        if load_y:
+            labelfile = self.disk_loader.labelfiles[mega_batch_index]
+            with open(labelfile, 'r') as ff:
+                yy = np.array([self._label2idx[int(line.strip())] for line in ff], dtype=theano.config.floatX)
+            logging.debug('Loaded {}'.format(labelfile))
+
+            self.th_train_set.yf.set_value(yy)
+
+    def load_mega_batch(self, mega_batch_index, load_y=False):
+        if self.load_from == LoadFrom.RAM:
+            self.load_shared_from_ram(mega_batch_index, load_y)
+        else:
+            self.load_shared_from_disk(mega_batch_index, load_y)
+
     def pretrain(self):
         # start-snippet-2
         #########################
@@ -228,7 +344,6 @@ class DbnMegaBatch(object):
 
         logging.info('... pre-training the model')
         start_time = timeit.default_timer()
-        mega_batch_size = self.num_samples / self.num_mega_batches
         # Pre-train layer-wise
         for layer_idx in xrange(self.dbn.n_layers):
             logging.debug('pretrain layer {}/{}'.format(layer_idx + 1, self.dbn.n_layers))
@@ -241,9 +356,7 @@ class DbnMegaBatch(object):
                 cc_idx = 0
 
                 for mega_batch_index in xrange(self.num_mega_batches):
-                    lo, hi = mega_batch_index * mega_batch_size, (mega_batch_index + 1) * mega_batch_size
-                    logging.debug('Setting train_set.x[{}:{}]'.format(lo, hi))
-                    self.th_train_set.x.set_value(self.mm_train_set.x[lo:hi])
+                    self.load_mega_batch(mega_batch_index, load_y=False)
 
                     for batch_index in xrange(self.num_minibatches_in_mega):
                         logging.debug('pretrain layer {}, epoch {}, mega_batch {}/{}, batch {}/{}'.format(
@@ -328,10 +441,7 @@ class DbnMegaBatch(object):
             train_loss = []
 
             for mega_batch_index in xrange(self.num_mega_batches):
-                lo, hi = mega_batch_index * mega_batch_size, (mega_batch_index + 1) * mega_batch_size
-                logging.debug('Setting train_set[{}:{}]'.format(lo, hi))
-                self.th_train_set.x.set_value(self.mm_train_set.x[lo:hi])
-                self.th_train_set.yf.set_value(self.mm_train_set.y[lo:hi])
+                self.load_mega_batch(mega_batch_index, load_y=True)
 
                 for minibatch_index in xrange(self.num_minibatches_in_mega):
                     logging.debug('finetune epoch {}, megabatch {}/{}, minibatch {}/{}'.format(
