@@ -34,6 +34,7 @@ def debug2(self, message, *args, **kws):
         self._log(DEBUG2_LEVEL_NUM, message, args, **kws)
 logging.Logger.debug2 = debug2
 logging.debug2 = logging.root.debug2
+logging.DEBUG2 = DEBUG2_LEVEL_NUM
 
 
 class FeatureSet(object):
@@ -160,6 +161,9 @@ class DbnMegaBatch(object):
         self.num_minibatches_in_mega = 0        # num batches in a mega batch
         self.mm_train_set = FeatureSet()
 
+        # logging level is expected to be set *before* this class is instantiated
+        self.global_logging_level = logging.root.getEffectiveLevel()
+
         if load_from == LoadFrom.disk:
             self.disk_loader = DiskLoader(dataset_file)
         else:
@@ -268,7 +272,8 @@ class DbnMegaBatch(object):
         logging.info('set up th_train_set.x with shape: {}'.format(
             self.th_train_set.x.get_value(borrow=borrow).shape))
 
-        logging.debug2('self.th_train_set.y[:20]={}'.format(self.th_train_set.y.eval()[:20]))
+        if self.global_logging_level <= logging.DEBUG2:
+            logging.debug2('self.th_train_set.y[:20]={}'.format(self.th_train_set.y.eval()[:20]))
         # with replacement
         # np.random.seed(4242)
         # self.valid_size = self.valid_size or round(0.3 * self.num_samples)
@@ -303,7 +308,8 @@ class DbnMegaBatch(object):
         '''
         mega_batch_size = self.num_samples / self.num_mega_batches
         lo, hi = mega_batch_index * mega_batch_size, (mega_batch_index + 1) * mega_batch_size
-        logging.debug('Setting train_set.x[{}:{}]'.format(lo, hi))
+        if self.global_logging_level <= logging.DEBUG2:
+            logging.debug2('Setting train_set.x[{}:{}]'.format(lo, hi))
         self.th_train_set.x.set_value(self.mm_train_set.x[lo:hi])
         if load_y:
             self.th_train_set.yf.set_value(self.mm_train_set.y[lo:hi])
@@ -312,7 +318,8 @@ class DbnMegaBatch(object):
         datafile = self.disk_loader.datafiles[mega_batch_index]
         with open(datafile, 'rb') as fobj:
             xx = np.array([x for x in nn_util.load_pickle_file(fobj)], dtype=theano.config.floatX)
-        logging.debug('Loaded {}'.format(datafile))
+        if self.global_logging_level <= logging.DEBUG:
+            logging.debug('Loaded {}'.format(datafile))
 
         self.th_train_set.x.set_value(xx)
 
@@ -320,7 +327,8 @@ class DbnMegaBatch(object):
             labelfile = self.disk_loader.labelfiles[mega_batch_index]
             with open(labelfile, 'r') as ff:
                 yy = np.array([self._label2idx[int(line.strip())] for line in ff], dtype=theano.config.floatX)
-            logging.debug('Loaded {}'.format(labelfile))
+            if self.global_logging_level <= logging.DEBUG:
+                logging.debug('Loaded {}'.format(labelfile))
 
             self.th_train_set.yf.set_value(yy)
 
@@ -346,10 +354,10 @@ class DbnMegaBatch(object):
         start_time = timeit.default_timer()
         # Pre-train layer-wise
         for layer_idx in xrange(self.dbn.n_layers):
-            logging.debug('pretrain layer {}/{}'.format(layer_idx + 1, self.dbn.n_layers))
+            logging.info('pretrain layer {}/{}'.format(layer_idx + 1, self.dbn.n_layers))
             # go through pretraining epochs
             for epoch in xrange(self.pretraining_epochs):
-                logging.debug('pretrain layer {}, epoch {}/{}'.format(
+                logging.info('pretrain layer {}, epoch {}/{}'.format(
                     layer_idx + 1, epoch + 1, self.pretraining_epochs))
                 # go through the training set
                 cc = np.zeros(self.num_minibatches_in_mega * self.num_mega_batches)
@@ -359,18 +367,21 @@ class DbnMegaBatch(object):
                     self.load_mega_batch(mega_batch_index, load_y=False)
 
                     for batch_index in xrange(self.num_minibatches_in_mega):
-                        logging.debug('pretrain layer {}, epoch {}, mega_batch {}/{}, batch {}/{}'.format(
-                            layer_idx + 1, epoch + 1, mega_batch_index + 1, self.num_mega_batches,
-                            batch_index + 1, self.num_minibatches_in_mega))
+                        if self.global_logging_level <= logging.DEBUG:
+                            logging.debug('pretrain layer {}, epoch {}, mega_batch {}/{}, batch {}/{}'.format(
+                                layer_idx + 1, epoch + 1, mega_batch_index + 1, self.num_mega_batches,
+                                batch_index + 1, self.num_minibatches_in_mega))
                         cost = pretraining_fns[layer_idx](index=batch_index, lr=self.pretrain_lr)
                         cc[cc_idx] = cost
                         cc_idx += 1
 
-                        logging.debug2('W={}, hbias={}, vbias={}'.format(
-                            self.dbn.rbm_layers[0].W[:2, :2].eval(), self.dbn.rbm_layers[0].hbias[:4].eval(),
-                            self.dbn.rbm_layers[0].vbias[:4].eval()))
+                        if self.global_logging_level <= logging.DEBUG2:
+                            logging.debug2('W={}, hbias={}, vbias={}'.format(
+                                self.dbn.rbm_layers[0].W[:2, :2].eval(), self.dbn.rbm_layers[0].hbias[:4].eval(),
+                                self.dbn.rbm_layers[0].vbias[:4].eval()))
 
-                logging.debug2('cost: {}'.format(cc))
+                if self.global_logging_level <= logging.DEBUG2:
+                    logging.debug2('cost: {}'.format(cc))
                 logging.info('pre-train layer {:d}, epoch {:d}, avg cost {}'.format(layer_idx, epoch, np.mean(cc)))
 
                 l2 = [p.norm(2).eval() for p in self.dbn.params]
@@ -433,32 +444,38 @@ class DbnMegaBatch(object):
         epoch = 0
         best_train_loss = np.inf
 
-        logging.debug('W[:2, :4]={}, b[:4]={}'.format(
-            self.dbn.logLayer.W[:2, :4].eval(), self.dbn.logLayer.b[:4].eval()))
+        if self.global_logging_level <= logging.DEBUG2:
+            logging.debug2('W[:2, :4]={}, b[:4]={}'.format(
+                self.dbn.logLayer.W[:2, :4].eval(), self.dbn.logLayer.b[:4].eval()))
         while (epoch < self.finetune_training_epochs) and (not done_looping):
             epoch = epoch + 1
-            logging.debug('finetune epoch {}/{}'.format(epoch, self.finetune_training_epochs))
+            logging.info('finetune epoch {}/{}'.format(epoch, self.finetune_training_epochs))
             train_loss = []
 
             for mega_batch_index in xrange(self.num_mega_batches):
                 self.load_mega_batch(mega_batch_index, load_y=True)
 
                 for minibatch_index in xrange(self.num_minibatches_in_mega):
-                    logging.debug('finetune epoch {}, megabatch {}/{}, minibatch {}/{}'.format(
-                        epoch, mega_batch_index + 1, self.num_mega_batches,
-                        minibatch_index + 1, self.num_minibatches_in_mega))
+                    if self.global_logging_level <= logging.DEBUG:
+                        logging.debug('finetune epoch {}, megabatch {}/{}, minibatch {}/{}'.format(
+                            epoch, mega_batch_index + 1, self.num_mega_batches,
+                            minibatch_index + 1, self.num_minibatches_in_mega))
                     # ****** execute the update ******
-                    logging.debug2('x_begin/end, y_begin/end={}'.format(indices(minibatch_index)))
+                    if self.global_logging_level <= logging.DEBUG2:
+                        logging.debug2('x_begin/end, y_begin/end={}'.format(indices(minibatch_index)))
                     minibatch_avg_cost = train_fn(minibatch_index)
-                    logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
-                        self.dbn.sigmoid_layers[0].W[:1, :4].eval(), self.dbn.sigmoid_layers[0].b[:4].eval()))
-                    logging.debug2('logLayer W[:1, :4]={}, b[:4]={}'.format(
-                        self.dbn.logLayer.W[:1, :4].eval(), self.dbn.logLayer.b[:4].eval()))
+                    if self.global_logging_level <= logging.DEBUG2:
+                        logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
+                            self.dbn.sigmoid_layers[0].W[:1, :4].eval(), self.dbn.sigmoid_layers[0].b[:4].eval()))
+                    if self.global_logging_level <= logging.DEBUG2:
+                        logging.debug2('logLayer W[:1, :4]={}, b[:4]={}'.format(
+                            self.dbn.logLayer.W[:1, :4].eval(), self.dbn.logLayer.b[:4].eval()))
                     # ********************************
                     logging.info('minibatch_avg_cost={}'.format(minibatch_avg_cost))
 
                 train_loss.extend(train_score(0, self.num_minibatches_in_mega))
-                logging.debug2('train_loss={}'.format(train_loss))
+                if self.global_logging_level <= logging.DEBUG2:
+                    logging.debug2('train_loss={}'.format(train_loss))
 
             l2 = [p.norm(2).eval() for p in self.dbn.params]
             l2all = np.sqrt(sum(x * x for x in l2))

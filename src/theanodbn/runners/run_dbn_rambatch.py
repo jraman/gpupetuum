@@ -34,7 +34,7 @@ conf_module = importlib.import_module(conf_basename.replace('.py', ''))
 conf = conf_module.DbnConfig
 
 log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d %(levelname)s %(message)s'
-logging.basicConfig(format=log_format, level=1)
+logging.basicConfig(format=log_format, level=conf.loglevel)
 
 
 runner = dbn_batch.DbnMegaBatch(
