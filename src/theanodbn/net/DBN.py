@@ -148,7 +148,7 @@ class DBN(object):
         # symbolic variable that points to the number of errors made on the
         # minibatch given by self.x and self.y
         self.errors = self.logLayer.errors_cross_entropy(self.y)
-        #self.errors_cross_entropy = self.logLayer.errors_cross_entropy(self.y)
+        # self.errors_cross_entropy = self.logLayer.errors_cross_entropy(self.y)
 
     def pretraining_functions(self, train_set_x, batch_size, k):
         '''Generates a list of functions, for performing one step of
@@ -627,9 +627,9 @@ def test_dbn(
     end_time = timeit.default_timer()
     logging.info(
         (
-            'Optimization complete with avg train error of %f %%, best validation error of %f %%, '
-            'obtained at iteration %i, with avg test error %f %%'
-        ) % (avg_train_loss * 100., best_validation_loss * 100., best_iter + 1, avg_test_loss * 100.)
+            'Optimization complete with avg train error of %f, best validation error of %f, '
+            'obtained at iteration %i, with avg test error %f'
+        ) % (avg_train_loss, best_validation_loss, best_iter + 1, avg_test_loss)
     )
     logging.info('The fine tuning code ran for {:.2f}m'.format((end_time - start_time) / 60.))
 
