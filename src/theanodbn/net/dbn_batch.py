@@ -431,7 +431,6 @@ class DbnMegaBatch(object):
             datasets=datasets,
             mini_batch_size=self.batch_size,
             mega_batch_size=mega_batch_size,
-            learning_rate=self.finetune_lr
         )
 
         logging.info('... finetuning the model')
@@ -461,8 +460,11 @@ class DbnMegaBatch(object):
             self.load_mega_batch(0, load_y=True)
 
         while (epoch < self.finetune_training_epochs) and (not done_looping):
+            learning_rate = self.finetune_lr / np.sqrt(epoch + 1)
+            learning_rate = np.asscalar(np.array(learning_rate, dtype=theano.config.floatX))
             epoch = epoch + 1
-            logging.info('finetune epoch {}/{}'.format(epoch, self.finetune_training_epochs))
+            logging.info('finetune epoch {}/{}, learning_rate={:.4f}'.format(
+                epoch, self.finetune_training_epochs, learning_rate))
             train_loss = []
 
             for mega_batch_index in xrange(self.num_mega_batches):
@@ -477,7 +479,7 @@ class DbnMegaBatch(object):
                     # ****** execute the update ******
                     if self.global_logging_level <= logging.DEBUG2:
                         logging.debug2('x_begin/end, y_begin/end={}'.format(indices(minibatch_index)))
-                    minibatch_avg_cost = train_fn(minibatch_index)
+                    minibatch_avg_cost = train_fn(minibatch_index, learning_rate)
                     if self.global_logging_level <= logging.DEBUG2:
                         logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
                             self.dbn.sigmoid_layers[0].W[:1, :4].eval(), self.dbn.sigmoid_layers[0].b[:4].eval()))
