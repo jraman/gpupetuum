@@ -6,15 +6,17 @@ and write out labels to outlabelfile.
 If converting all samples, inlabelfile is redundant, but makes the code simpler.
 '''
 
+import argparse
 import cPickle
+import functools
 import logging
 import numpy as np
 import struct
-import sys
 
 
 SIZE_FLOAT = 4
 NUM_FEATURES_IMNET = 21504
+NUM_FEATURES_TIMIT = 360
 
 
 class Llc2Pickle(object):
@@ -110,7 +112,7 @@ class Llc2Pickle(object):
         return labels
 
 
-def main(args):
+def main():
     '''
     :param args[0]: input file
     :param args[1]: input label file
@@ -118,22 +120,31 @@ def main(args):
     :param args[3]: (optional) output label selection file
     :param args[4]: (optional) output label file (required if selection file above is specified)
     '''
+    args = _myargparse()
     log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d %(levelname)s %(message)s'
     logging.basicConfig(format=log_format, level=logging.DEBUG)
-    infile = args[0]
-    inlabelfile = args[1]
-    outfile = args[2]
-    selectlabelfile = args[3] if args[3:] else None
-    outlabelfile = args[4] if args[4:] else None
-    if selectlabelfile:
-        assert outlabelfile, 'If selectlabelfile, then outlabelfile is required'
-    converter = Llc2Pickle(infile, inlabelfile, NUM_FEATURES_IMNET, outfile, selectlabelfile, outlabelfile)
+    converter = Llc2Pickle(args.infile, args.labelfile, args.num_features,
+                           args.outfile, args.selectlabelfile, args.outlabelfile)
     converter.process_file()
 
 
+def _myargparse():
+    help_formatter = functools.partial(argparse.ArgumentDefaultsHelpFormatter, width=104)
+    parser = argparse.ArgumentParser(
+        description='Feature Extractor',
+        formatter_class=help_formatter)
+    parser.add_argument('-i', '--infile', action='store', help='input LLC binary file', required=True)
+    parser.add_argument('-o', '--outfile', action='store', help='output pkl files', required=True)
+    parser.add_argument('-n', '--num-features', action='store', type=int, help='feature dimension', required=True)
+    parser.add_argument('-l', '--labelfile', action='store', help='label file', required=True)
+    parser.add_argument('-s', '--selectlabelfile', action='store', help='file with a list of labels to select')
+    parser.add_argument('--outlabelfile', action='store',
+                        help='in the case of selectlabelfile, corresponding lablefile')
+    args = parser.parse_args()
+    if args.selectlabelfile:
+        assert args.outlabelfile, 'If selectlabelfile, then outlabelfile is required'
+    return args
+
+
 if __name__ == '__main__':
-    # read_file('../../data/imnet_data/imnet_0.bin', '../../data/imnet_0.pkl.gz')
-    if sys.argv[3:]:
-        main(sys.argv[1:])
-    else:
-        print 'ERROR.  Usage: {} infile inlabelfile outfile [selectlabelfile outlabelfile]'.format(sys.argv[0])
+    main()
