@@ -352,6 +352,12 @@ class DbnMegaBatch(object):
 
         logging.info('... pre-training the model')
         start_time = timeit.default_timer()
+
+        # special case optimization: load only once if num_mega_batches == 1
+        if self.num_mega_batches == 1:
+            logging.info('Single megabatch.  Loading it into GPU/CPU')
+            self.load_mega_batch(0, load_y=False)
+
         # Pre-train layer-wise
         for layer_idx in xrange(self.dbn.n_layers):
             logging.info('pretrain layer {}/{}'.format(layer_idx + 1, self.dbn.n_layers))
@@ -364,7 +370,8 @@ class DbnMegaBatch(object):
                 cc_idx = 0
 
                 for mega_batch_index in xrange(self.num_mega_batches):
-                    self.load_mega_batch(mega_batch_index, load_y=False)
+                    if self.num_mega_batches > 1:
+                        self.load_mega_batch(mega_batch_index, load_y=False)
 
                     for batch_index in xrange(self.num_minibatches_in_mega):
                         if self.global_logging_level <= logging.DEBUG:
@@ -424,7 +431,6 @@ class DbnMegaBatch(object):
             datasets=datasets,
             mini_batch_size=self.batch_size,
             mega_batch_size=mega_batch_size,
-            learning_rate=self.finetune_lr
         )
 
         logging.info('... finetuning the model')
@@ -447,13 +453,23 @@ class DbnMegaBatch(object):
         if self.global_logging_level <= logging.DEBUG2:
             logging.debug2('W[:2, :4]={}, b[:4]={}'.format(
                 self.dbn.logLayer.W[:2, :4].eval(), self.dbn.logLayer.b[:4].eval()))
+
+        # special case optimization: load only once if num_mega_batches == 1
+        if self.num_mega_batches == 1:
+            logging.info('Single megabatch.  Loading it into GPU/CPU')
+            self.load_mega_batch(0, load_y=True)
+
         while (epoch < self.finetune_training_epochs) and (not done_looping):
+            learning_rate = self.finetune_lr / np.sqrt(epoch + 1)
+            learning_rate = np.asscalar(np.array(learning_rate, dtype=theano.config.floatX))
             epoch = epoch + 1
-            logging.info('finetune epoch {}/{}'.format(epoch, self.finetune_training_epochs))
+            logging.info('finetune epoch {}/{}, learning_rate={:.4f}'.format(
+                epoch, self.finetune_training_epochs, learning_rate))
             train_loss = []
 
             for mega_batch_index in xrange(self.num_mega_batches):
-                self.load_mega_batch(mega_batch_index, load_y=True)
+                if self.num_mega_batches > 1:
+                    self.load_mega_batch(mega_batch_index, load_y=True)
 
                 for minibatch_index in xrange(self.num_minibatches_in_mega):
                     if self.global_logging_level <= logging.DEBUG:
@@ -463,7 +479,7 @@ class DbnMegaBatch(object):
                     # ****** execute the update ******
                     if self.global_logging_level <= logging.DEBUG2:
                         logging.debug2('x_begin/end, y_begin/end={}'.format(indices(minibatch_index)))
-                    minibatch_avg_cost = train_fn(minibatch_index)
+                    minibatch_avg_cost = train_fn(minibatch_index, learning_rate)
                     if self.global_logging_level <= logging.DEBUG2:
                         logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
                             self.dbn.sigmoid_layers[0].W[:1, :4].eval(), self.dbn.sigmoid_layers[0].b[:4].eval()))
@@ -494,7 +510,7 @@ class DbnMegaBatch(object):
                 break
 
         end_time = timeit.default_timer()
-        logging.info('Optimization complete with avg train error of {:f} %'.format(avg_train_loss * 100.))
+        logging.info('Optimization complete with avg train error of {:f}'.format(avg_train_loss))
         logging.info('The fine tuning code ran for {:.2f}m'.format((end_time - start_time) / 60.))
 
         logging.info('Saving finetuned model file to {}'.format(self.finetuned_model_file))

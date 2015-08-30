@@ -148,7 +148,7 @@ class DBN(object):
         # symbolic variable that points to the number of errors made on the
         # minibatch given by self.x and self.y
         self.errors = self.logLayer.errors_cross_entropy(self.y)
-        #self.errors_cross_entropy = self.logLayer.errors_cross_entropy(self.y)
+        # self.errors_cross_entropy = self.logLayer.errors_cross_entropy(self.y)
 
     def pretraining_functions(self, train_set_x, batch_size, k):
         '''Generates a list of functions, for performing one step of
@@ -302,7 +302,7 @@ class DBN(object):
 
         return train_fn, train_score, valid_score, test_score
 
-    def build_finetune_functions2(self, datasets, mini_batch_size, mega_batch_size, learning_rate):
+    def build_finetune_functions2(self, datasets, mini_batch_size, mega_batch_size):
         '''Generates a function `train` that implements one step of
         finetuning, a function `validate` that computes the error on a
         batch from the validation set, and a function `test` that
@@ -316,8 +316,6 @@ class DBN(object):
                         datapoints, the other for the labels
         :type mini_batch_size: int
         :param mini_batch_size: size of a minibatch
-        :type learning_rate: float
-        :param learning_rate: learning rate used during finetune stage
 
         assume all of y is loaded into GPU memory, but x is loaded in megabatches.
         '''
@@ -328,6 +326,7 @@ class DBN(object):
         # (test_set_x, test_set_y) = datasets[2]
 
         mini_index = T.lscalar('mini_index')  # index to a [mini]batch
+        learning_rate = T.scalar('learning_rate')
 
         # compute the gradients with respect to the model parameters
         gparams = T.grad(self.finetune_cost, self.params)
@@ -346,7 +345,7 @@ class DBN(object):
         y_end = y_begin + mini_batch_size
 
         train_fn = theano.function(
-            inputs=[mini_index],
+            inputs=[mini_index, learning_rate],
             outputs=self.finetune_cost,
             updates=updates,
             givens={
@@ -627,9 +626,9 @@ def test_dbn(
     end_time = timeit.default_timer()
     logging.info(
         (
-            'Optimization complete with avg train error of %f %%, best validation error of %f %%, '
-            'obtained at iteration %i, with avg test error %f %%'
-        ) % (avg_train_loss * 100., best_validation_loss * 100., best_iter + 1, avg_test_loss * 100.)
+            'Optimization complete with avg train error of %f, best validation error of %f, '
+            'obtained at iteration %i, with avg test error %f'
+        ) % (avg_train_loss, best_validation_loss, best_iter + 1, avg_test_loss)
     )
     logging.info('The fine tuning code ran for {:.2f}m'.format((end_time - start_time) / 60.))
 
