@@ -25,7 +25,7 @@ class DbnConfig(object):
     pretraining_epochs = 4
     pretrain_lr = 0.05
     cd_k = 1
-    finetune_training_epochs = 10
+    finetune_training_epochs = 4
     finetune_lr = 0.05
     num_mega_batches = 2
     batch_size = 188 / 2 / num_mega_batches

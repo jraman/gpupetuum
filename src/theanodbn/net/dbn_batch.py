@@ -172,6 +172,8 @@ class DbnMegaBatch(object):
         self.dbn = None
 
     def run(self):
+        self._touch(self.pretrain_model_file)
+        self._touch(self.finetuned_model_file)
         logging.info('THEANO_FLAGS={}'.format(os.getenv('THEANO_FLAGS')))
         if self.load_from == LoadFrom.RAM:
             self.load_data_mm()
@@ -355,6 +357,12 @@ class DbnMegaBatch(object):
         logging.info('... pre-training the model')
         start_time = timeit.default_timer()
 
+        if self.global_logging_level <= logging.DEBUG2:
+            logging.debug2('Initial weights:')
+            for ii, layer in enumerate(self.dbn.rbm_layers):
+                logging.debug2('layer {}, W={}, hbias={}, vbias={}'.format(
+                    ii, layer.W[:2, :2].eval(), layer.hbias[:4].eval(), layer.vbias[:4].eval()))
+
         # special case optimization: load only once if num_mega_batches == 1
         if self.num_mega_batches == 1:
             logging.info('Single megabatch.  Loading it into GPU/CPU')
@@ -385,9 +393,10 @@ class DbnMegaBatch(object):
                         cc_idx += 1
 
                         if self.global_logging_level <= logging.DEBUG2:
-                            logging.debug2('W={}, hbias={}, vbias={}'.format(
-                                self.dbn.rbm_layers[0].W[:2, :2].eval(), self.dbn.rbm_layers[0].hbias[:4].eval(),
-                                self.dbn.rbm_layers[0].vbias[:4].eval()))
+                            for layer in self.dbn.rbm_layers:
+                                for ii, layer in enumerate(self.dbn.rbm_layers):
+                                    logging.debug2('layer {}, W={}, hbias={}, vbias={}'.format(
+                                        ii, layer.W[:2, :2].eval(), layer.hbias[:4].eval(), layer.vbias[:4].eval()))
 
                 if self.global_logging_level <= logging.DEBUG2:
                     logging.debug2('cost: {}'.format(cc))
@@ -553,3 +562,9 @@ class DbnMegaBatch(object):
         logging.info('Saving finetuned model file to {}'.format(self.finetuned_model_file))
         self.dbn.save_model(self.finetuned_model_file)
         logging.info('done saving')
+
+    def _touch(self, filename):
+        'test that we can write to file'
+        if filename:
+            with open(filename, 'w'):
+                pass

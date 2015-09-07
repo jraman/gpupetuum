@@ -29,6 +29,7 @@ def _myargparse():
         formatter_class=help_formatter)
     parser.add_argument('-c', '--conf-filepath', action='store', help='config file with path', required=True)
     parser.add_argument('--finetune-lr', action='store', type=float, help='finetune learning rate')
+    parser.add_argument('--finetuned-model-file', action='store', help='Name of finetune model file to save')
     args = parser.parse_args()
     return args
 
@@ -54,11 +55,13 @@ logging.basicConfig(format=log_format, level=conf.loglevel)
 
 
 finetune_lr = args.finetune_lr or conf.finetune_lr
+finetuned_model_file = args.finetuned_model_file or relpath(conf_dir, conf.finetuned_model_file)
+
 runner = dbn_batch.DbnMegaBatch(
     dataset_file=relpath(conf_dir, conf.dataset_file),
     label_file=relpath(conf_dir, conf.label_file),
     pretrain_model_file=relpath(conf_dir, conf.pretrain_model_file),
-    finetuned_model_file=relpath(conf_dir, conf.finetuned_model_file),
+    finetuned_model_file=finetuned_model_file,
     load_from=conf.load_from,
     hidden_layers_sizes=conf.hidden_layers_sizes,
     pretraining_epochs=conf.pretraining_epochs,
