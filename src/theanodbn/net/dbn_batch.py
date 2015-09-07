@@ -214,9 +214,11 @@ class DbnMegaBatch(object):
         '''Load all of input data into main memory.
         Set up theano shared variables so that data can be moved from main memory to GPU memory in mega batches.
         '''
+        logging.info('Loading file {}'.format(self.dataset_file))
         with open(self.dataset_file, 'rb') as fobj:
             self.mm_train_set.x = np.array([x for x in nn_util.load_pickle_file(fobj)], dtype=theano.config.floatX)
 
+        logging.info('Loading file {}'.format(self.label_file))
         with open(self.label_file, 'r') as ff:
             self.mm_train_set.y = np.array([int(line.strip()) for line in ff], dtype=theano.config.floatX)
 
@@ -444,8 +446,6 @@ class DbnMegaBatch(object):
         logging.info('patience={}, patience_increase={}, improvement_threshold={:.4f}, validation_frequency={}'.format(
             patience, patience_increase, improvement_threshold, validation_frequency))
 
-        start_time = timeit.default_timer()
-
         done_looping = False
         epoch = 0
         best_train_loss = np.inf
@@ -459,9 +459,26 @@ class DbnMegaBatch(object):
             logging.info('Single megabatch.  Loading it into GPU/CPU')
             self.load_mega_batch(0, load_y=True)
 
+        if self.global_logging_level <= logging.DEBUG:
+            # it may take a few seconds to compute L2 norm
+            l2 = [p.norm(2).eval() for p in self.dbn.params]
+            l2all = np.sqrt(sum(x * x for x in l2))
+            logging.info('epoch {}: L2 norms: all={}, individual={}'.format(
+                epoch, l2all, ', '.join(str(x) for x in l2)))
+
+        # match printing of minibatch_avg_cost after each minibatch
+        logging.info('delta_t=0, epoch 0, mega 0, mini 0, minibatch_avg_cost={}'.format(
+            np.mean(train_score(0, self.num_minibatches_in_mega)) / self.batch_size))
+
+        # fixed learning_rate
+        learning_rate = np.asscalar(np.array(self.finetune_lr, dtype=theano.config.floatX))
+
+        start_time = timeit.default_timer()
+
         while (epoch < self.finetune_training_epochs) and (not done_looping):
-            learning_rate = self.finetune_lr / np.sqrt(epoch + 1)
-            learning_rate = np.asscalar(np.array(learning_rate, dtype=theano.config.floatX))
+            # learning_rate = self.finetune_lr / np.sqrt(epoch + 1)
+            # learning_rate = np.asscalar(np.array(learning_rate, dtype=theano.config.floatX))
+
             epoch = epoch + 1
             logging.info('finetune epoch {}/{}, learning_rate={:.4f}'.format(
                 epoch, self.finetune_training_epochs, learning_rate))
@@ -470,6 +487,8 @@ class DbnMegaBatch(object):
             for mega_batch_index in xrange(self.num_mega_batches):
                 if self.num_mega_batches > 1:
                     self.load_mega_batch(mega_batch_index, load_y=True)
+
+                minibatch_avg_cost_arr = np.zeros(self.num_minibatches_in_mega)
 
                 for minibatch_index in xrange(self.num_minibatches_in_mega):
                     if self.global_logging_level <= logging.DEBUG:
@@ -480,6 +499,7 @@ class DbnMegaBatch(object):
                     if self.global_logging_level <= logging.DEBUG2:
                         logging.debug2('x_begin/end, y_begin/end={}'.format(indices(minibatch_index)))
                     minibatch_avg_cost = train_fn(minibatch_index, learning_rate)
+                    minibatch_avg_cost_arr[minibatch_index] = minibatch_avg_cost
                     if self.global_logging_level <= logging.DEBUG2:
                         logging.debug2('hiddenLayer0 W[:1, :4]={}, b[:4]={}'.format(
                             self.dbn.sigmoid_layers[0].W[:1, :4].eval(), self.dbn.sigmoid_layers[0].b[:4].eval()))
@@ -487,30 +507,47 @@ class DbnMegaBatch(object):
                         logging.debug2('logLayer W[:1, :4]={}, b[:4]={}'.format(
                             self.dbn.logLayer.W[:1, :4].eval(), self.dbn.logLayer.b[:4].eval()))
                     # ********************************
-                    logging.info('minibatch_avg_cost={}'.format(minibatch_avg_cost))
+                    logging.info('delta_t={:.3f}, epoch {}/{}, mega {}/{}, mini {}/{}, minibatch_avg_cost={}'.format(
+                        timeit.default_timer() - start_time, epoch, self.finetune_training_epochs,
+                        mega_batch_index + 1, self.num_mega_batches,
+                        minibatch_index + 1, self.num_minibatches_in_mega, minibatch_avg_cost))
 
-                train_loss.extend(train_score(0, self.num_minibatches_in_mega))
-                if self.global_logging_level <= logging.DEBUG2:
-                    logging.debug2('train_loss={}'.format(train_loss))
+                # train_loss is computed at the end of a mega-batch.
+                # Hence, the values here will likely be different than minibatch_avg_cost even if the error computed
+                # in train_loss is the same as the cost in minibatch_avg_cost
+                if self.global_logging_level <= logging.DEBUG:
+                    train_loss.extend(train_score(0, self.num_minibatches_in_mega))
+                    if self.global_logging_level <= logging.DEBUG2:
+                        logging.debug2('train_loss={}'.format(train_loss))
 
-            l2 = [p.norm(2).eval() for p in self.dbn.params]
-            l2all = np.sqrt(sum(x * x for x in l2))
-            logging.info('epoch {}: L2 norms: all={}, individual={}'.format(
-                epoch, l2all, ', '.join(str(x) for x in l2)))
+            logging.info('delta_t={}, avg_minibatch_avg_cost={}'.format(
+                timeit.default_timer() - start_time, np.mean(minibatch_avg_cost_arr)))
 
-            avg_train_loss = np.mean(train_loss)
-            logging.info('epoch {}: avg_train_loss={}'.format(epoch, avg_train_loss))
-            if avg_train_loss < best_train_loss:
-                if avg_train_loss < best_train_loss * improvement_threshold:
-                    patience = max(patience, epoch * patience_increase)
-                best_train_loss = avg_train_loss
+            if self.global_logging_level <= logging.DEBUG:
+                l2 = [p.norm(2).eval() for p in self.dbn.params]
+                l2all = np.sqrt(sum(x * x for x in l2))
+                logging.info('epoch {}: L2 norms: all={}, individual={}'.format(
+                    epoch, l2all, ', '.join(str(x) for x in l2)))
 
-            if patience <= epoch:
-                done_looping = True
-                break
+            # np.mean(train_loss) gives the mean loss per minibatch
+            if self.global_logging_level <= logging.DEBUG:
+                logging.debug('train_loss: {}'.format(train_loss[:10]))
+
+                avg_train_loss = np.mean(train_loss) / self.batch_size
+                logging.info('epoch {}: avg_train_loss={}'.format(epoch, avg_train_loss))
+
+                if avg_train_loss < best_train_loss:
+                    if avg_train_loss < best_train_loss * improvement_threshold:
+                        patience = max(patience, epoch * patience_increase)
+                    best_train_loss = avg_train_loss
+
+                if patience <= epoch:
+                    done_looping = True
+                    break
+
+                logging.info('Optimization complete with avg train error of {:f}'.format(avg_train_loss))
 
         end_time = timeit.default_timer()
-        logging.info('Optimization complete with avg train error of {:f}'.format(avg_train_loss))
         logging.info('The fine tuning code ran for {:.2f}m'.format((end_time - start_time) / 60.))
 
         logging.info('Saving finetuned model file to {}'.format(self.finetuned_model_file))

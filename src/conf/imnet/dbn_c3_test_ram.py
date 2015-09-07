@@ -4,18 +4,22 @@ When comparing with and without mega-batches, only the last mega-batch and its c
 numbers from the without scenario can be compared.
 
 This config file can be used for either gpubatch (mini-batch with all data loaded in GPU memory),
-or rambatch (mini-batch with all data loaded in CPU RAM and transferred back and forth to GPU memory)
+or rambatch (mini-batch with all data loaded in CPU RAM and transferred back and forth to GPU memory).
+
+Usage:
+$ python theanodbn/runners/run_dbn_rambatch.py <path/to/thisfile>   # ram
+$ python theanodbn/runners/run_dbn_gpubatch.py <path/to/thisfile>   # gpu
 '''
 
 
 class DbnConfig(object):
     loglevel = 1
 
-    dataset_file = '../../imnet_data/filelist.n3.txt'
-    label_file = '../../imnet_data/label_select.n3.txt'
+    dataset_file = '../../imnet_data/imnet_sample.n3.pkl'
+    label_file = '../../imnet_data/label_sample.n3.txt'
     pretrain_model_file = '../../model/dbn.pretrain.test3.pkl'
     finetuned_model_file = '../../model/dbn.finetuned.test3.pkl'
-    load_from = 'disk'
+    load_from = 'RAM'
 
     hidden_layers_sizes = [128]
     pretraining_epochs = 4
