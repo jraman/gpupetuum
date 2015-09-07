@@ -425,8 +425,9 @@ class DBN(object):
         return num_batches
 
     def save_model(self, filename):
-        with open(filename, 'w') as ff:
-            cPickle.dump(self, ff)
+        if filename:
+            with open(filename, 'w') as ff:
+                cPickle.dump(self, ff)
 
     @staticmethod
     def load_model(filename):
