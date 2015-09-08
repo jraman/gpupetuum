@@ -28,9 +28,22 @@ def _myargparse():
         description='DBN Runner',
         formatter_class=help_formatter)
     parser.add_argument('-c', '--conf-filepath', action='store', help='config file with path', required=True)
+    parser.add_argument('--continue-run', action='store_true', default=None,
+                        help='continue previous run after loading saved model file')
+    parser.add_argument(
+        '--finetune-epoch-start', action='store', type=int,
+        help='(zero indexed) start of range for epochs.  E.g. if previously run for 100 epochs, set this to 100.')
     parser.add_argument('--finetune-lr', action='store', type=float, help='finetune learning rate')
     parser.add_argument('--finetuned-model-file', action='store', help='Name of finetune model file to save')
+    parser.add_argument(
+        '--finetune-training-epochs', action='store', type=int,
+        help='End of range for finetune epochs - follows python range() convention')
+    parser.add_argument('--start-model-file', action='store', help='Existing model file to load prior to training')
     args = parser.parse_args()
+    test1 = any([args.continue_run, args.start_model_file is not None, args.finetune_epoch_start is not None])
+    test2 = all([args.continue_run, args.start_model_file is not None, args.finetune_epoch_start is not None])
+    if test1 and not test2:
+        raise Exception('Not all params set for continue-run')
     return args
 
 
@@ -54,8 +67,13 @@ log_format = '%(asctime)s %(name)s %(filename)s:%(lineno)d %(levelname)s %(messa
 logging.basicConfig(format=log_format, level=conf.loglevel)
 
 
+continue_run = args.continue_run if args.continue_run is not None else conf.continue_run
 finetune_lr = args.finetune_lr or conf.finetune_lr
 finetuned_model_file = args.finetuned_model_file or relpath(conf_dir, conf.finetuned_model_file)
+finetune_epoch_start = args.finetune_epoch_start if args.finetune_epoch_start is not None else conf.finetune_epoch_start
+finetune_training_epochs = args.finetune_training_epochs if args.finetune_training_epochs is not None else \
+    conf.finetune_training_epochs
+start_model_file = args.start_model_file or relpath(conf_dir, conf.start_model_file)
 
 runner = dbn_batch.DbnMegaBatch(
     dataset_file=relpath(conf_dir, conf.dataset_file),
@@ -67,17 +85,17 @@ runner = dbn_batch.DbnMegaBatch(
     pretraining_epochs=conf.pretraining_epochs,
     pretrain_lr=conf.pretrain_lr,
     k=conf.cd_k,
-    finetune_training_epochs=conf.finetune_training_epochs,
+    finetune_training_epochs=finetune_training_epochs,
     finetune_lr=finetune_lr,
     num_mega_batches=conf.num_mega_batches,
     batch_size=conf.batch_size,
     numpy_rng_seed=conf.numpy_rng_seed,
     valid_size=conf.valid_size,
     test_size=conf.test_size,
-    continue_run=conf.continue_run,
-    start_model_file=conf.start_model_file and relpath(conf_dir, conf.start_model_file),
+    continue_run=continue_run,
+    start_model_file=start_model_file,
     pretrain_epoch_start=conf.pretrain_epoch_start,
-    finetune_epoch_start=conf.finetune_epoch_start,
+    finetune_epoch_start=finetune_epoch_start,
 )
 
 runner.run()
