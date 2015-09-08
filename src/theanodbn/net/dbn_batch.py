@@ -7,6 +7,7 @@ Notes:
  * We use parts of the last megabatch as validation and test sets.
 '''
 
+import cPickle
 import csv
 import logging
 import numpy as np
@@ -96,6 +97,10 @@ class DbnMegaBatch(object):
         numpy_rng_seed=4242,
         valid_size=None,
         test_size=None,
+        continue_run=False,
+        start_model_file=None,
+        pretrain_epoch_start=0,
+        finetune_epoch_start=0,
     ):
         """
         Either:
@@ -110,17 +115,23 @@ class DbnMegaBatch(object):
         :type finetune_lr: float
         :param finetune_lr: learning rate used in the finetune stage
         :type pretraining_epochs: int
-        :param pretraining_epochs: number of epoch to do pretraining
+        :param pretraining_epochs: number of epoch to do pretraining (or end of range for pretrain epoch).
+            Set this to zero to skip pretraining.
         :type pretrain_lr: float
         :param pretrain_lr: learning rate to be used during pre-training
         :type k: int
         :param k: number of Gibbs steps in CD/PCD
-        :type training_epochs: int
-        :param training_epochs: maximal number of iterations to run the optimizer
+        :type finetune_training_epochs: int
+        :param finetune_training_epochs: maximal number of iterations to run the optimizer (end of range for finetune)
         :type dataset_file: string
         :param dataset_file: path to the pickled dataset file
         :type batch_size: int
         :param batch_size: the size of a minibatch
+        :type continue_run: bool
+        :param continue_run: if True, then the model stored in start_model_file will be loaded
+            and depending on the other param settings, either continue pretrain or continue finetune.
+        :type start_model_file: string
+        :param start_model_file: name (and possibly location) of DBN model file to be loaded
         """
         assert load_from in (LoadFrom.RAM, LoadFrom.disk), 'Can only load from {} or {}, not {}'.format(
             LoadFrom.RAM, LoadFrom.disk, load_from)
@@ -136,6 +147,10 @@ class DbnMegaBatch(object):
         logging.info('numpy_rng seed={}'.format(numpy_rng_seed))
         logging.info('valid_size={}'.format(valid_size))
         logging.info('test_size={}'.format(test_size))
+        logging.info('continue_run={}'.format(continue_run))
+        logging.info('start_model_file={}'.format(start_model_file))
+        logging.info('pretrain_epoch_start={}'.format(pretrain_epoch_start))
+        logging.info('finetune_epoch_start={}'.format(finetune_epoch_start))
 
         self.dataset_file = dataset_file
         self.label_file = label_file
@@ -153,6 +168,10 @@ class DbnMegaBatch(object):
         self.numpy_rng_seed = numpy_rng_seed
         self.valid_size = valid_size or 0
         self.test_size = test_size or 0
+        self.continue_run = continue_run
+        self.start_model_file = start_model_file
+        self.pretrain_epoch_start = pretrain_epoch_start
+        self.finetune_epoch_start = finetune_epoch_start
 
         self.num_samples = 0
         self.num_features = 0
@@ -179,7 +198,10 @@ class DbnMegaBatch(object):
             self.load_data_mm()
         else:
             self.prepare()
-        self.build_model()
+        if self.continue_run:
+            self.load_dbn_model()
+        else:
+            self.build_model()
         self.setup_shared_xy()
         self.pretrain()
         self.finetune()
@@ -242,7 +264,7 @@ class DbnMegaBatch(object):
 
         assert self.num_samples == self.mm_train_set.y.shape[0], "Num rows in X and Y don't match"
 
-        assert self.num_samples % self.batch_size == 0, 'num_samples not a int multiple of batch_size'
+        assert self.num_samples % self.batch_size == 0, 'num_samples not an int multiple of batch_size'
 
         self.num_minibatches = self.num_samples / self.batch_size
         self.num_minibatches_in_mega = self.num_samples / self.batch_size / self.num_mega_batches
@@ -306,6 +328,12 @@ class DbnMegaBatch(object):
 
         logging.info('Param shapes: {}'.format(
             ', '.join(['{}:{}'.format(p, p.shape.eval()) for p in self.dbn.params])))
+
+    def load_dbn_model(self):
+        logging.info('Loading DBN model from {}'.format(self.start_model_file))
+        with open(self.start_model_file) as fobj:
+            self.dbn = cPickle.load(fobj)
+        logging.info('Done loading DBN model')
 
     def load_shared_from_ram(self, mega_batch_index, load_y):
         '''Load data from main memory to theano shared variable.
@@ -372,7 +400,7 @@ class DbnMegaBatch(object):
         for layer_idx in xrange(self.dbn.n_layers):
             logging.info('pretrain layer {}/{}'.format(layer_idx + 1, self.dbn.n_layers))
             # go through pretraining epochs
-            for epoch in xrange(self.pretraining_epochs):
+            for epoch in xrange(self.pretrain_epoch_start, self.pretraining_epochs):
                 logging.info('pretrain layer {}, epoch {}/{}'.format(
                     layer_idx + 1, epoch + 1, self.pretraining_epochs))
                 # go through the training set
@@ -385,8 +413,9 @@ class DbnMegaBatch(object):
 
                     for batch_index in xrange(self.num_minibatches_in_mega):
                         if self.global_logging_level <= logging.DEBUG:
-                            logging.debug('pretrain layer {}, epoch {}, mega_batch {}/{}, batch {}/{}'.format(
-                                layer_idx + 1, epoch + 1, mega_batch_index + 1, self.num_mega_batches,
+                            logging.debug('pretrain layer {}, epoch {}/{}, mega_batch {}/{}, batch {}/{}'.format(
+                                layer_idx + 1, epoch + 1, self.pretraining_epochs,
+                                mega_batch_index + 1, self.num_mega_batches,
                                 batch_index + 1, self.num_minibatches_in_mega))
                         cost = pretraining_fns[layer_idx](index=batch_index, lr=self.pretrain_lr)
                         cc[cc_idx] = cost
@@ -400,12 +429,13 @@ class DbnMegaBatch(object):
 
                 if self.global_logging_level <= logging.DEBUG2:
                     logging.debug2('cost: {}'.format(cc))
-                logging.info('pre-train layer {:d}, epoch {:d}, avg cost {}'.format(layer_idx, epoch, np.mean(cc)))
+                logging.info('pre-train layer {:d}, epoch {:d}/{}, avg cost {}'.format(
+                    layer_idx, epoch + 1, self.pretraining_epochs, np.mean(cc)))
 
                 l2 = [p.norm(2).eval() for p in self.dbn.params]
                 l2all = np.sqrt(sum(x * x for x in l2))
-                logging.info('pre-train layer {:d}, epoch {}, L2 norms: all={}, individual={}'.format(
-                    layer_idx, epoch, l2all, ', '.join(str(x) for x in l2)))
+                logging.info('pre-train layer {:d}, epoch {}/{}, L2 norms: all={}, individual={}'.format(
+                    layer_idx, epoch + 1, self.pretraining_epochs, l2all, ', '.join(str(x) for x in l2)))
 
         end_time = timeit.default_timer()
         # end-snippet-2
@@ -456,7 +486,7 @@ class DbnMegaBatch(object):
             patience, patience_increase, improvement_threshold, validation_frequency))
 
         done_looping = False
-        epoch = 0
+        epoch = self.finetune_epoch_start
         best_train_loss = np.inf
 
         if self.global_logging_level <= logging.DEBUG2:

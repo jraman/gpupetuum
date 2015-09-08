@@ -74,6 +74,10 @@ runner = dbn_batch.DbnMegaBatch(
     numpy_rng_seed=conf.numpy_rng_seed,
     valid_size=conf.valid_size,
     test_size=conf.test_size,
+    continue_run=conf.continue_run,
+    start_model_file=conf.start_model_file and relpath(conf_dir, conf.start_model_file),
+    pretrain_epoch_start=conf.pretrain_epoch_start,
+    finetune_epoch_start=conf.finetune_epoch_start,
 )
 
 runner.run()
