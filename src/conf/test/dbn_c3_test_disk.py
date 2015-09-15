@@ -33,3 +33,7 @@ class DbnConfig(object):
     numpy_rng_seed = 4242
     valid_size = 0      # unused
     test_size = 0       # unused
+    continue_run = False
+    start_model_file = None
+    pretrain_epoch_start = 0
+    finetune_epoch_start = 0

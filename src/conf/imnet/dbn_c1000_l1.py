@@ -16,3 +16,7 @@ class DbnConfig(object):
     numpy_rng_seed = 4242
     valid_size = batch_size * 70 * 3    # approx 30%
     test_size = batch_size * 70     # approx 10%
+    continue_run = False
+    start_model_file = None
+    pretrain_epoch_start = 0
+    finetune_epoch_start = 0
